@@ -1,0 +1,12 @@
+{
+  "name": "esportsranker",
+  "private": true,
+  "workspaces": ["frontend", "desktop"],
+  "scripts": {
+    "dev:backend": "cd backend && python manage.py runserver",
+    "dev:frontend": "cd frontend && next dev",
+    "dev:desktop": "cd desktop && vite",
+    "lint": "echo 'lint stubs'",
+    "test": "echo 'test stubs'"
+  }
+}

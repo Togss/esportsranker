@@ -1,0 +1,15 @@
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+
+package-lock.json -diff
+pnpm-lock.yaml -diff
+yarn.lock -diff
+
+backend/** linguist-language=Python
+frontend/** linguist-language=TypeScript
+desktop/** linguist-language=TypeScript
