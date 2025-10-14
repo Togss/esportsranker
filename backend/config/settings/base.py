@@ -25,6 +25,15 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'drf_spectacular',
+
+    # Esports Ranker Apps
+    'accounts',
+    'competitions',
+    'teams',
+    'players',
+    'rankings',
+    'ingest',
+    'common',
 ]
 
 MIDDLEWARE = [
