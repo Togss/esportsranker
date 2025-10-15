@@ -34,6 +34,7 @@ INSTALLED_APPS = [
     'rankings',
     'ingest',
     'common',
+    'heroes',
 ]
 
 MIDDLEWARE = [
