@@ -11,7 +11,7 @@ class PlayerAdmin(admin.ModelAdmin):
     search_fields = ('ign', 'name', 'memberships__team__short_name', 'memberships__team__name')
     readonly_fields = ('created_at', 'updated_at', 'photo_preview')
     prepopulated_fields = {'slug': ('ign',)}
-    ordering = ('ign',)
+    ordering = ('memberships__team__short_name', 'ign')
     fieldsets = (
         ('Identity', {
             'fields': ('ign', 'role', 'name', 'slug', 'nationality', 'date_of_birth')

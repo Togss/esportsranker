@@ -10,6 +10,7 @@ urlpatterns = [
     #API (v1)
     path('api/v1/', include('teams.urls')),
     path('api/v1/', include('players.urls')),
+    path('api/v1/', include('heroes.urls')),
 
     #API Schema and Docs
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
