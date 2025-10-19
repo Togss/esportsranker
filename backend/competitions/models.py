@@ -1,5 +1,7 @@
 from django.db import models
 from django.db.models import Q, F
+from django.utils import timezone
+from django.core.exceptions import ValidationError
 from common.models import TimeStampedModel, SluggedModel
 from teams.models import Team
 from heroes.models import Hero
@@ -24,11 +26,11 @@ class Tournament(SluggedModel, TimeStampedModel):
     start_date = models.DateField(db_index=True)
     end_date = models.DateField(db_index=True)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, db_index=True)
-    teams = models.ManyToManyField(Team, related_name='tournaments', blank=True)
+    teams = models.ManyToManyField('teams.Team', related_name='tournaments', blank=True)
     prize_pool = models.PositiveIntegerField(blank=True, null=True, help_text="Prize pool in USD")
     logo = models.ImageField(upload_to='tournament_logos/', blank=True, null=True)
     description = models.TextField(blank=True)
-    rules = models.TextField(blank=True)
+    tournament_rules_link = models.URLField(blank=True, help_text="Link to the tournament rules")
 
     class Meta:
         ordering = ['-start_date', 'name']
@@ -42,6 +44,7 @@ class Tournament(SluggedModel, TimeStampedModel):
             models.Index(fields=['end_date']),
             models.Index(fields=['region', 'status']),
             models.Index(fields=['tier', 'status']),
+            models.Index(fields=['start_date', 'end_date']),
         ]
         constraints = [
             models.CheckConstraint(check=~Q(slug=''), name='tournament_slug_not_empty'),
@@ -54,17 +57,52 @@ class Tournament(SluggedModel, TimeStampedModel):
                 check=Q(end_date__gte=F('start_date')),
                 name='end_date_after_start_date'
             ),
+
         ]
+
+    def compute_status(self):
+        today = timezone.localdate()
+        if self.start_date and self.end_date:
+            if today < self.start_date:
+                return 'UPCOMING'
+            elif self.start_date <= today <= self.end_date:
+                return 'ONGOING'
+            else:
+                return 'COMPLETED'
+        return 'UPCOMING'
+    
+    def save(self, *args, **kwargs):
+        self.status = self.compute_status()
+        return super().save(*args, **kwargs)
+
     def __str__(self):
         return self.name
-    
 
+
+STAGE_TYPES = [
+    ('WILD CARD', 'Wild Card Stage'),
+    ('GROUPS', 'Group Stage'),
+    ('REGULAR SEASON', 'Regular Season'),
+    ('KNOCKOUTS', 'Knockout Stage'),
+    ('PLAYOFFS', 'Playoff Stage'),
+    ('FINALS', 'Grand Finals'),
+]
+
+TIER_STAGE_CHOICES = [
+    ('1', 'Tier 1'),
+    ('2', 'Tier 2'),
+    ('3', 'Tier 3'),
+    ('4', 'Tier 4'),
+    ('5', 'Tier 5'),
+]
 class Stage(TimeStampedModel):
     tournament = models.ForeignKey(Tournament, on_delete=models.CASCADE, related_name='stages', db_index=True)
-    name = models.CharField(max_length=100)
+    stage_type = models.CharField(max_length=20, choices=STAGE_TYPES, db_index=True)
     order = models.PositiveIntegerField(help_text="Order of the stage in the tournament")
-    start_date = models.DateField()
-    end_date = models.DateField()
+    start_date = models.DateField(db_index=True)
+    end_date = models.DateField(db_index=True)
+    tier = models.CharField(max_length=2, choices=TIER_STAGE_CHOICES, db_index=True)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, db_index=True)
 
     class Meta:
         ordering = ['tournament', 'order']
@@ -77,21 +115,63 @@ class Stage(TimeStampedModel):
         ]
         constraints = [
             models.UniqueConstraint(
-                fields=['tournament', 'name'],
-                name='unique_stage_name_per_tournament',
+                fields=['tournament', 'stage_type'],
+                name='unique_stage_type_per_tournament',
                 deferrable=models.Deferrable.DEFERRED
             ),
             models.CheckConstraint(
                 check=Q(end_date__gte=F('start_date')),
                 name='stage_end_date_after_start_date'
             ),
+            models.UniqueConstraint(
+                fields=['tournament', 'order'],
+                name='unique_stage_order_per_tournament',
+                deferrable=models.Deferrable.DEFERRED
+            ),
+            models.CheckConstraint(
+                check=Q(order__gte=1),
+                name='stage_order_gte_1'
+            ),
         ]
-    def __str__(self):
-        return f"{self.tournament.name} - {self.name}"
+
+    def clean(self):
+        super().clean()
+        if not self.tournament:
+            raise ValidationError("Stage must be associated with a tournament.")
+        t_start, t_end = self.tournament.start_date, self.tournament.end_date
+        if self.start_date < t_start or self.end_date > t_end:
+            raise ValidationError("Stage dates must be within the tournament dates.")
+        
+        if self.tournament and self.order:
+            qs = Stage.objects.filter(tournament_id=self.tournament_id, order=self.order)
+            if self.pk:
+                qs = qs.exclude(pk=self.pk)
+            if qs.exists():
+                raise ValidationError(f"Stage order {self.order} already exists for this tournament.")
+        
+    def compute_status(self):
+        today = timezone.localdate()
+        if self.start_date and self.end_date:
+            if today < self.start_date:
+                return 'UPCOMING'
+            elif self.start_date <= today <= self.end_date:
+                return 'ONGOING'
+            else:
+                return 'COMPLETED'
+        return 'UPCOMING'
     
+    def save(self, *args, **kwargs):
+        self.status = self.compute_status()
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.stage_type} - {self.tournament.name}"
+
 
 class Series(TimeStampedModel):
-    stage = models.ForeignKey(Stage, related_name='series', on_delete=models.CASCADE, db_index=True)
+    tournament = models.ForeignKey(Tournament, related_name='series', on_delete=models.CASCADE, db_index=True)
+    stage_type = models.ForeignKey(Stage, related_name='series', on_delete=models.CASCADE, db_index=True)
     team1 = models.ForeignKey(Team, related_name='series_as_team1', on_delete=models.CASCADE, db_index=True)
     team2 = models.ForeignKey(Team, related_name='series_as_team2', on_delete=models.CASCADE, db_index=True)
     winner = models.ForeignKey(Team, related_name='series_won', on_delete=models.SET_NULL, null=True, blank=True, db_index=True)
@@ -104,30 +184,27 @@ class Series(TimeStampedModel):
         verbose_name = 'Series'
         verbose_name_plural = 'Series'
         indexes = [
-            models.Index(fields=['stage']),
+            models.Index(fields=['tournament']),
+            models.Index(fields=['stage_type']),
             models.Index(fields=['team1']),
             models.Index(fields=['team2']),
             models.Index(fields=['winner']),
             models.Index(fields=['scheduled_date']),
-            models.Index(fields=['team1', 'team2']),
         ]
         constraints = [
             models.UniqueConstraint(
-                fields=['stage', 'team1', 'team2'],
-                name='unique_series_per_stage',
+                fields=['stage_type', 'team1', 'team2'],
+                name='unique_series_per_stage_teams',
                 deferrable=models.Deferrable.DEFERRED
             ),
             models.CheckConstraint(
                 check=~Q(team1=F('team2')),
-                name='teams_must_be_different'
-            ),
-            models.CheckConstraint(
-                check=Q(best_of__in=[1, 3, 5, 7]),
-                name='valid_best_of_value'
+                name='teams_must_be_different_in_series'
             ),
         ]
+
     def __str__(self):
-        return f"{self.team1.short_name} vs {self.team2.short_name} - {self.stage.name}"
+        return f"{self.team1.short_name} vs {self.team2.short_name} - {self.stage_type}"
     
 
 class Game(TimeStampedModel):

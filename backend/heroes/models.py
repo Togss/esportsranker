@@ -3,6 +3,7 @@ from common.models import TimeStampedModel, SluggedModel
 
 class Hero(SluggedModel, TimeStampedModel):
     hero_class = models.CharField(max_length=50, unique=True)
+    hero_pic = models.ImageField(upload_to='hero_pictures/', blank=True, null=True)
 
     class Meta:
         ordering = ['name']
