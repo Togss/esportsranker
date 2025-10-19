@@ -1,9 +1,9 @@
 from django.db import models
 from django.core.validators import MinValueValidator, MaxValueValidator, MinLengthValidator, RegexValidator
 from django.core.exceptions import ValidationError
+from datetime import date
 from common.models import TimeStampedModel, SluggedModel
 from teams.models import Team
-from datetime import date
 
 ROLE_CHOICES = [
     ('GOLD', 'Gold Lane'),
@@ -23,8 +23,7 @@ IGN_VALIDATOR = RegexValidator(
 )
 
 class Player(TimeStampedModel, SluggedModel ):
-    ign = models.CharField(max_length=24, unique=True, validators=[IGN_VALIDATOR, MinLengthValidator(2)])
-    real_name = models.CharField(max_length=100, blank=True)
+    ign = models.CharField(max_length=24, unique=True)
     photo = models.ImageField(upload_to=player_photo_upload_to, blank=True, null=True)
     role = models.CharField(max_length=10, choices=ROLE_CHOICES, db_index=True)
     date_of_birth = models.DateField(blank=True, null=True)
@@ -84,7 +83,7 @@ class PlayerMembership(TimeStampedModel):
                 raise ValidationError("This membership period overlaps with another membership for the same player.")
             
     def __str__(self):
-        end_display = self.end_date or "present"
+        end_display = self.end_date or 'present'
         return f"{self.player.ign} - {self.team.short_name} ({self.start_date} to {end_display})"
     
     @property

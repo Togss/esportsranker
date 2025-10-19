@@ -2,26 +2,19 @@ from django.contrib import admin
 from django.utils.html import format_html
 from django.utils import timezone
 from django.db import models
-from .models import Player, PlayerMembership
-
-class PlayerMembershipInline(admin.TabularInline):
-    model = PlayerMembership
-    extra = 0
-    autocomplete_fields = ['team']
-    fields = 'team', 'role_at_team', 'start_date', 'end_date', 'is_starter'
-    ordering = ('-start_date',)
+from .models import Player
 
 @admin.register(Player)
 class PlayerAdmin(admin.ModelAdmin):
     list_display = ('photo_thumb', 'ign', 'role', 'current_team_for_list', 'nationality', 'is_active')
     list_filter = ('role', 'nationality', 'is_active', 'memberships__team')
-    search_fields = ('ign', 'real_name', 'memberships__team__short_name', 'memberships__team__name')
+    search_fields = ('ign', 'name', 'memberships__team__short_name', 'memberships__team__name')
     readonly_fields = ('created_at', 'updated_at', 'photo_preview')
     prepopulated_fields = {'slug': ('ign',)}
     ordering = ('ign',)
     fieldsets = (
         ('Identity', {
-            'fields': ('ign', 'role', 'real_name', 'slug', 'nationality', 'date_of_birth')
+            'fields': ('ign', 'role', 'name', 'slug', 'nationality', 'date_of_birth')
         }),
         ('Photo', {
             'fields': ('photo', 'photo_preview'),
@@ -38,7 +31,6 @@ class PlayerAdmin(admin.ModelAdmin):
             'fields': ('created_at', 'updated_at')
         }),
     )
-    inlines = [PlayerMembershipInline]
 
     def current_team_for_list(self, obj: Player):
         today = timezone.localdate()

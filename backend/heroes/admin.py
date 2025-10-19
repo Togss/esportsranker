@@ -4,21 +4,35 @@ from .models import Hero
 
 @admin.register(Hero)
 class HeroAdmin(admin.ModelAdmin):
-    list_display = ('hero_pic_thumb', 'name', 'hero_class')
-    list_filter = ('hero_class',)
-    search_fields = ('name', 'hero_class', 'slug')
-    readonly_fields = ('created_at', 'updated_at')
+    list_display = ('icon_thumb', 'name', 'class_combo')
+    list_filter = ('primary_class',)
+    search_fields = ('name', 'primary_class', 'slug')
+    readonly_fields = ('created_at', 'updated_at', 'icon_preview')
     prepopulated_fields = {'slug': ('name',)}
-    ordering = ('hero_class', 'name')
+    ordering = ('primary_class', 'name')
     fieldsets = (
         ('Identity', {
-            'fields': ('hero_pic', 'name', 'slug', 'hero_class')}),
+            'fields': ('hero_icon', 'icon_preview', 'name', 'slug', 'primary_class', 'secondary_class')}),
         ('Timestamps', {
             'fields': ('created_at', 'updated_at')}),
     )
 
-    def hero_pic_thumb(self, obj):
-        if getattr(obj, 'hero_pic') and getattr(obj.hero_pic, 'url'):
-            return format_html('<img src="{}" style="height:24px;width:auto;border-radius:3px;object-fit:contain"/>', obj.hero_pic.url)
-        return "(No Picture)"
-    hero_pic_thumb.short_description = 'Hero Picture'
+    @admin.display(description='Hero Icon')
+    def icon_thumb(self, obj: Hero):
+        if obj.hero_icon:
+            return format_html(
+                '<img src="{}" style="height:24px;width:auto;border-radius:3px;object-fit:cover"/>',
+                obj.hero_icon.url)
+        return "No Icon"
+    
+    @admin.display(description='Icon Preview', ordering='hero_icon')
+    def icon_preview(self, obj: Hero):
+        if obj.hero_icon:
+            return format_html(
+                '<img src="{}" style="height:100px;width:auto;border-radius:5px;object-fit:cover"/>',
+                obj.hero_icon.url)
+        return "No Icon"
+    
+    @admin.display(description='Class')
+    def class_combo(self, obj: Hero):
+        return ' / '.join(obj.classes) if obj.classes else "-"
