@@ -23,6 +23,7 @@ REGION_CHOICES = [
     ('CN', 'China'),
     ('MENA', 'Middle East and North Africa'),
     ('LATAM', 'Latin America'),
+    ('INT', 'International'),
 ]
 
 SHORT_NAME_VALIDATOR = RegexValidator(

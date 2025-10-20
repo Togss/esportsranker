@@ -9,6 +9,7 @@ from common.models import TimeStampedModel, SluggedModel
 from teams.models import Team
 from heroes.models import Hero
 from decimal import Decimal, ROUND_HALF_UP
+from common.slug_helper import ensure_unique_slug, build_stage_slug_base
 
 class TournamentTeam(models.Model):
     INVITED = "INVITED"
@@ -137,9 +138,11 @@ TIER_STAGE_CHOICES = [
     ('4', 'Tier 4'),
     ('5', 'Tier 5'),
 ]
-class Stage(TimeStampedModel, SluggedModel):
+class Stage(TimeStampedModel):
     tournament = models.ForeignKey(Tournament, on_delete=models.CASCADE, related_name='stages', db_index=True)
     stage_type = models.CharField(max_length=20, choices=STAGE_TYPES, db_index=True)
+    slug = models.SlugField(max_length=50, blank=True, unique=True)
+    variant = models.CharField(max_length=50, blank=True, help_text="Variant of the stage, e.g., 'Double Elimination'")
     order = models.PositiveIntegerField(help_text="Order of the stage in the tournament")
     start_date = models.DateField(db_index=True)
     end_date = models.DateField(db_index=True)
@@ -151,14 +154,14 @@ class Stage(TimeStampedModel, SluggedModel):
         verbose_name = 'Stage'
         verbose_name_plural = 'Stages'
         indexes = [
-            models.Index(fields=['tournament', 'order']),
+            models.Index(fields=['tournament', 'stage_type', 'variant']),
             models.Index(fields=['start_date']),
             models.Index(fields=['end_date']),
         ]
         constraints = [
             models.UniqueConstraint(
-                fields=['tournament', 'stage_type'],
-                name='unique_stage_type_per_tournament',
+                fields=['tournament', 'stage_type', 'variant'],
+                name='unique_stage_type_variant_per_tournament',
                 deferrable=models.Deferrable.DEFERRED
             ),
             models.CheckConstraint(
@@ -176,14 +179,23 @@ class Stage(TimeStampedModel, SluggedModel):
             ),
         ]
 
-    def clean(self):
-        return super().clean()
-        if not self.tournament:
-            raise ValidationError("Stage must be associated with a tournament.")
-        t_start, t_end = self.tournament.start_date, self.tournament.end_date
-        if self.start_date < t_start or self.end_date > t_end:
-            raise ValidationError("Stage dates must be within the tournament dates.")
+    def __str__(self):
+        type_label = dict(STAGE_TYPES).get(self.stage_type, self.stage_type.title())
+        return f'{type_label}{f" - {self.variant}" if self.variant else ""} ({self.tournament.name})'
 
+    def clean(self):
+        super().clean()
+
+        if not self.tournament_id:
+            raise ValidationError("Tournament must be set for the stage.")
+        
+        if self.start_date and self.end_date and self.end_date < self.start_date:
+            raise ValidationError("End date must be after or equal to start date.")
+        t = self.tournament
+        if (t.start_date and self.start_date and self.start_date < t.start_date) or \
+           (t.end_date and self.end_date and self.end_date > t.end_date):
+            raise ValidationError("Stage dates must be within the tournament dates.")
+        
     def compute_status(self):
         today = timezone.localdate()
         if self.start_date and self.end_date:
@@ -196,13 +208,16 @@ class Stage(TimeStampedModel, SluggedModel):
         return 'UPCOMING'
     
     def save(self, *args, **kwargs):
+        if not self.slug:
+            base = build_stage_slug_base(self)
+            candidate = base
+        else:
+            candidate = self.slug
+        self.slug = ensure_unique_slug(candidate, self.__class__, instance_pk=self.pk)
         self.status = self.compute_status()
         self.full_clean()
-        return super().save(*args, **kwargs)
-
-    def __str__(self):
-        return f"{self.stage_type} - {self.tournament.name}"
-
+        super().save(*args, **kwargs)
+        
 
 class Series(TimeStampedModel):
     tournament = models.ForeignKey(Tournament, related_name='series', on_delete=models.CASCADE, db_index=True)
@@ -279,7 +294,7 @@ class Series(TimeStampedModel):
         return score_str, winner
 
     def clean(self):
-        return super().clean()
+        super().clean()
         if self.stage and self.tournament and self.stage.tournament != self.tournament_id:
             raise ValidationError("Stage must be associated with the tournament.")
         if self.tournament_id:
@@ -288,6 +303,10 @@ class Series(TimeStampedModel):
                 raise ValidationError("Team 1 must be part of the tournament.")
             if self.team2_id and self.team2_id not in team_ids:
                 raise ValidationError("Team 2 must be part of the tournament.")
+            
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
 
 class Game(TimeStampedModel):
     RESULT_CHOICES = [

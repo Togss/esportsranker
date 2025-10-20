@@ -21,7 +21,7 @@ from heroes.models import Hero
 class StageInline(admin.TabularInline):
     model = Stage
     extra = 0
-    fields = ("stage_type", "name", "order", "tier", "start_date", "end_date")
+    fields = ("stage_type", "variant", "order", "tier", "start_date", "end_date")
     ordering = ("order",)
     show_change_link = True
     
@@ -101,18 +101,22 @@ class TournamentAdmin(admin.ModelAdmin):
     def team_count(self, obj: Tournament):
         return obj.teams.count()
 
+@admin.display(description="Stage")
+def stage_title(obj: Stage):
+    type_label = dict(Stage.STAGE_TYPES).get(obj.stage_type, obj.stage_type)
+    return f'{type_label}{f" - {obj.variant}" if obj.variant else ""}'
 
 @admin.register(Stage)
 class StageAdmin(admin.ModelAdmin):
-    list_display = ("stage_type", "name", "tournament", "order", "status", "start_date", "end_date")
+    list_display = ("stage_type", "variant", "tournament", "order", "status", "start_date", "end_date")
     list_filter = ("tournament",)
-    search_fields = ("name", "tournament__name",)
-    prepopulated_fields = {"slug": ("stage_type",)}
+    search_fields = ("stage_type", "variant", "tournament__name",)
+    prepopulated_fields = {"slug": ("stage_type", "variant")}
     ordering = ("tournament__start_date", "order")
     autocomplete_fields = ("tournament",)
     readonly_fields = ("status", "created_at", "updated_at")
     fieldsets = (
-        (None, {"fields": ("tournament", "stage_type", "name", "slug", "order", "tier")}),
+        (None, {"fields": ("tournament", "stage_type", "variant", "slug", "order", "tier")}),
         ("Schedule", {"fields": ("start_date", "end_date")}),
         ("Timestamps", {"classes": ("collapse",), "fields": ("status", "created_at", "updated_at")}),
     )
