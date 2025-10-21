@@ -217,7 +217,7 @@ class Stage(TimeStampedModel):
         self.status = self.compute_status()
         self.full_clean()
         super().save(*args, **kwargs)
-        
+
 
 class Series(TimeStampedModel):
     tournament = models.ForeignKey(Tournament, related_name='series', on_delete=models.CASCADE, db_index=True)
@@ -256,57 +256,32 @@ class Series(TimeStampedModel):
     def __str__(self):
         return f"{self.team1.short_name} vs {self.team2.short_name} - {self.stage}"
 
-    def compute_score_and_winner(self):
-        from competitions.models import Game
-        games = Game.objects.filter(series=self)
-        t1_wins = games.filter(winner=self.team1).count()
-        t2_wins = games.filter(winner=self.team2).count()
+    def compute_score_and_winner(self, persist: bool = True):
+        from .services import compute_series_score_and_winner
+        score_str, winner = compute_series_score_and_winner(self)
 
-        for g in games:
-            if g.result_type == 'FORFEIT_TEAM1':
-                t1_wins += 1
-                continue
-            elif g.result_type == 'FORFEIT_TEAM2':
-                t2_wins += 1
-                continue
-            if g.result_type == 'NO_CONTEST':
-                continue
-
-            if g.winner_id == self.team1_id:
-                t1_wins += 1
-            elif g.winner_id == self.team2_id:
-                t2_wins += 1
-
-        score_str = f"{t1_wins}-{t2_wins}"
-        needed = (self.best_of // 2) + 1
-        if t1_wins >= needed:
-            winner = self.team1
-        elif t2_wins >= needed:
-            winner = self.team2
-        else:
-            winner = None
-
-        changed = (self.score != score_str) or (self.winner_id != getattr(winner, 'id', None))
-        if changed:
+        if persist and (self.score != score_str or self.winner.id != (winner.id if winner else None)):
+            type(self).objects.filter(pk=self.pk).update(score=score_str, winner=winner)
             self.score = score_str
             self.winner = winner
-            self.save(update_fields=['score', 'winner', 'updated_at'])
+
         return score_str, winner
 
     def clean(self):
+        errors = {}
+        if not self.tournament_id:
+            errors['tournament'] = "Tournament must be set for the series."
+        if not self.stage_id:
+            errors['stage'] = "Stage must be set for the series."
+        elif self.stage.tournament_id and self.stage.tournament_id != self.tournament_id:
+            errors['stage'] = "Stage must belong to the same tournament as the series."
+
+        if self.team1_id and self.team2_id and self.team1_id == self.team2_id:
+            errors['team2'] = "Team 2 must be different from Team 1."
+
+        if errors:
+            raise ValidationError(errors)
         super().clean()
-        if self.stage and self.tournament and self.stage.tournament != self.tournament_id:
-            raise ValidationError("Stage must be associated with the tournament.")
-        if self.tournament_id:
-            team_ids = set(self.tournament.teams.values_list('id', flat=True))
-            if self.team1_id and self.team1_id not in team_ids:
-                raise ValidationError("Team 1 must be part of the tournament.")
-            if self.team2_id and self.team2_id not in team_ids:
-                raise ValidationError("Team 2 must be part of the tournament.")
-            
-    def save(self, *args, **kwargs):
-        self.full_clean()
-        return super().save(*args, **kwargs)
 
 class Game(TimeStampedModel):
     RESULT_CHOICES = [
@@ -320,7 +295,7 @@ class Game(TimeStampedModel):
     blue_side = models.ForeignKey(Team, related_name='games_as_blue_side', on_delete=models.CASCADE, db_index=True)
     red_side = models.ForeignKey(Team, related_name='games_as_red_side', on_delete=models.CASCADE, db_index=True)
     winner = models.ForeignKey(Team, related_name='games_won', on_delete=models.SET_NULL, null=True, blank=True, db_index=True)
-    duration = models.DurationField(help_text="Duration of the game")
+    duration = models.DurationField(null=True, blank=True, help_text="Duration of the game")
     vod_link = models.URLField(blank=True, help_text="Link to the VOD of the game")
     result_type = models.CharField(max_length=20, choices=RESULT_CHOICES, default='NORMAL')
 
@@ -348,6 +323,8 @@ class Game(TimeStampedModel):
                 name='sides_must_be_different'
             ),
         ]
+    def __str__(self):
+        return f"G{self.game_no} - {self.series}"
 
     def clean(self):
         from django.core.exceptions import ValidationError
@@ -368,47 +345,42 @@ class Game(TimeStampedModel):
         if self.game_no < 1 or self.game_no > self.series.best_of:
             raise ValidationError(f"Game number must be between 1 and {self.series.best_of}.")
         super().clean()
-
-        # Winner validation based on result_type
-        if self.result_type == 'NORMAL' and not self.winner:
-            raise ValidationError("Winner must be set for normal games.")
-        if self.result_type.startswith('FORFEIT') and self.winner:
-            raise ValidationError("Winner will be determined by forfeit; do not set it manually.")
         
     def save(self, *args, **kwargs):
         if self.result_type == "FORFEIT_TEAM1":
-            self.winner = self.series.team1
-        elif self.result_type == "FORFEIT_TEAM2":
             self.winner = self.series.team2
+        elif self.result_type == "FORFEIT_TEAM2":
+            self.winner = self.series.team1
         elif self.result_type == "NO_CONTEST":
             self.winner = None
         super().save(*args, **kwargs)
-
-    def __str__(self):
-        return f"G{self.game_no} - {self.series}"
     
 
-SIDE_CHOICES = [
-    ('BLUE', 'Blue Side'),
-    ('RED', 'Red Side'),
-]
-
 class TeamGameStat(TimeStampedModel):
+    BLUE = 'BLUE'
+    RED = 'RED' 
+    SIDE_CHOICES = [
+        (BLUE, 'Blue'),
+        (RED, 'Red'),
+    ]
+    VICTORY = 'VICTORY'
+    DEFEAT = 'DEFEAT'
+    RESULT_CHOICES = [
+        (VICTORY, 'Win'),
+        (DEFEAT, 'Loss'),
+    ]
     game = models.ForeignKey(Game, related_name='team_stats', on_delete=models.CASCADE, db_index=True)
     team = models.ForeignKey(Team, related_name='game_stats', on_delete=models.CASCADE, db_index=True)
     side = models.CharField(max_length=5, choices=SIDE_CHOICES, db_index=True)
 
-    # aggregate stats
-    k = models.PositiveIntegerField(default=0, help_text="Kills")
-    d = models.PositiveIntegerField(default=0, help_text="Deaths")
-    a = models.PositiveIntegerField(default=0, help_text="Assists")
-
-    turret_destroyed = models.PositiveIntegerField(default=0)
-    lord_kills = models.PositiveIntegerField(default=0)
-    turtle_kills = models.PositiveIntegerField(default=0)
-    first_blood = models.BooleanField(default=False)
-    game_win = models.BooleanField(default=False, help_text="Indicates if the team won the game")
+    tower_destroyed = models.PositiveSmallIntegerField(default=0)
+    lord_kills = models.PositiveSmallIntegerField(default=0)
+    turtle_kills = models.PositiveSmallIntegerField(default=0)
+    orange_buff = models.PositiveSmallIntegerField(default=0, help_text="Number of Orange Buffs secured")
+    purple_buff = models.PositiveSmallIntegerField(default=0, help_text="Number of Purple Buffs secured")
+    game_result = models.CharField(max_length=7, choices=RESULT_CHOICES, help_text="Result of the game for the team")
     gold = models.PositiveIntegerField(default=0, help_text="Total Gold Earned by the team")
+    score = models.PositiveSmallIntegerField(default=0, help_text="Total Team Score")
 
     class Meta:
         ordering = ['game', 'team']
@@ -430,24 +402,19 @@ class TeamGameStat(TimeStampedModel):
 
     def __str__(self):
         return f"{self.team.short_name} Stats - {self.game}"
+    
+    def __repr__(self):
+        return f"<TeamGameStat: {self.team.short_name} - Game {self.game.game_no} ({self.game.series})>"
 
     def clean(self):
-        from django.core.exceptions import ValidationError
-        if self.team not in [self.game.blue_side, self.game.red_side]:
+        super().clean()
+        
+        if self.team_id not in [self.game.blue_side_id, self.game.red_side_id]:
             raise ValidationError("Team must be one of the teams in the game.")
-        expected_side = 'BLUE' if self.team == self.game.blue_side else 'RED'
+        
+        expected_side = 'BLUE' if self.team_id == self.game.blue_side_id else 'RED'
         if self.side != expected_side:
             raise ValidationError(f"Side must be '{expected_side}' for the selected team.")
-        super().clean()
-
-    def recompute_gold(self):
-        total = self.playergamestat_set.aggregate(
-            total=Coalesce(Sum('gold'), 0)
-        )['total']
-        if self.gold != total:
-            self.gold = total
-            self.save(update_fields=['gold', 'updated_at'])
-
 
 ROLE_CHOICES = [
     ('GOLD', 'Gold Lane'),
@@ -468,9 +435,9 @@ class PlayerGameStat(TimeStampedModel):
 
     hero = models.ForeignKey(Hero, on_delete=models.PROTECT, db_index=True)
 
-    k = models.PositiveIntegerField(default=0, help_text="Kills")
-    d = models.PositiveIntegerField(default=0, help_text="Deaths")
-    a = models.PositiveIntegerField(default=0, help_text="Assists")
+    k = models.PositiveSmallIntegerField(default=0, help_text="Kills")
+    d = models.PositiveSmallIntegerField(default=0, help_text="Deaths")
+    a = models.PositiveSmallIntegerField(default=0, help_text="Assists")
     gold = models.PositiveIntegerField(default=0, help_text="Total Gold Earned")
     dmg_dealt = models.PositiveIntegerField(default=0, help_text="Total Damage Dealt")
     dmg_taken = models.PositiveIntegerField(default=0, help_text="Total Damage Taken")
@@ -551,7 +518,7 @@ class PlayerGameStat(TimeStampedModel):
 class GameDraftAction(TimeStampedModel):
     game = models.ForeignKey(Game, related_name='draft_actions', on_delete=models.CASCADE, db_index=True)
     action = models.CharField(max_length=10, choices=[('BAN', 'Ban'), ('PICK', 'Pick')])
-    side = models.CharField(max_length=5, choices=SIDE_CHOICES)
+    side = models.CharField(max_length=5, choices=TeamGameStat.SIDE_CHOICES, db_index=True)
     order = models.PositiveIntegerField(help_text="Order of the action in the draft, e.g., 1 for first action")
     hero = models.ForeignKey(Hero, on_delete=models.PROTECT, db_index=True)
 
@@ -621,27 +588,3 @@ class GameDraftAction(TimeStampedModel):
 
     def __str__(self):
         return f"{self.game} - {self.get_action_display()} {self.hero.name} ({self.side})"
-    
-from django.db.models.signals import post_save, post_delete
-from django.dispatch import receiver
-
-@receiver([post_save, post_delete], sender=Game)
-def update_series_result(sender, instance, **kwargs):
-    series = instance.series
-    if series_id := getattr(series, 'id', None):
-        try:
-            series.compute_score_and_winner()
-        except Exception as e:
-            print(f"Error updating series {series_id} after game change: {e}")
-
-@receiver([post_save, post_delete], sender='competitions.PlayerGameStat')
-def _pgs_touch_team_gold(sender, instance, **kwargs):
-    team_stat = getattr(instance, 'team_stat', None)
-    if not team_stat:
-        return
-    transaction.on_commit(lambda: team_stat.recompute_gold())
-
-@receiver([post_save, post_delete], sender='competitions.TeamGameStat')
-def _tgs_recompute_on_create(sender, instance, created, **kwargs):
-    if created:
-        transaction.on_commit(lambda: instance.recompute_gold())

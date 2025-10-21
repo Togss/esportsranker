@@ -32,13 +32,14 @@ INSTALLED_APPS = [
 
     # Esports Ranker Apps
     'accounts',
-    'competitions',
     'teams',
     'players',
     'rankings',
     'ingest',
     'common',
     'heroes',
+
+    'competitions.apps.CompetitionsConfig',
 ]
 
 MIDDLEWARE = [

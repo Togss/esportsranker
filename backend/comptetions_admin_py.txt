@@ -1,8 +1,9 @@
 from django.contrib import admin
 from django import forms
-from django.db.models import F, DurationField, Value
+from django.db.models import F, DurationField, ExpressionWrapper
 from django.db.models.functions import Coalesce
 from django.utils.html import format_html
+from django.utils import timezone
 from datetime import timedelta
 from django.core.exceptions import ValidationError
 
@@ -11,6 +12,8 @@ from competitions.models import (
     TeamGameStat, PlayerGameStat, GameDraftAction, TournamentTeam
 )
 from teams.models import Team
+from players.models import Player
+from heroes.models import Hero
 
 
 # ---------- Inlines ----------
@@ -21,12 +24,14 @@ class StageInline(admin.TabularInline):
     fields = ("stage_type", "variant", "order", "tier", "start_date", "end_date")
     ordering = ("order",)
     show_change_link = True
+    
 
 class TeamGameStatInline(admin.TabularInline):
     model = TeamGameStat
-    extra = 2
+    extra = 0
     autocomplete_fields = ("team",)
-    fields = ("team", "side", "gold", "tower_destroyed", "lord_kills", "turtle_kills", "orange_buff", "purple_buff", "game_result", "score")
+    fields = ("team", "k", "d", "a", "gold", "turret_destroyed", "lord_kills", "turtle_kills", "game_win")
+    readonly_fields = ("gold",)
     ordering = ("team__short_name",)
 
 
@@ -200,9 +205,6 @@ class GameAdminForm(forms.ModelForm):
     class Meta:
         model = Game
         fields = "__all__"
-        widgets = {
-            "duration": forms.HiddenInput(),  # hide original duration field
-        }
 
     # Nice text field for MM:SS entry
     duration_display = forms.CharField(
@@ -265,12 +267,15 @@ class GameAdminForm(forms.ModelForm):
         return timedelta(minutes=minutes, seconds=seconds)
 
     def save(self, commit=True):
-        has_display = "duration_display" in self.cleaned_data
-        display_val = self.cleaned_data.get("duration_display", None)
-        if has_display and display_val is not None:
-            self.instance.duration = display_val
+        """
+        If duration_display provided, set instance.duration to its timedelta (or None if blank).
+        If duration_display omitted entirely, leave duration as-is.
+        """
+        if "duration_display" in self.cleaned_data:
+            self.instance.duration = self.cleaned_data["duration_display"]  # may be timedelta or None
         return super().save(commit=commit)
     
+
 @admin.register(Game)
 class GameAdmin(admin.ModelAdmin):
     form = GameAdminForm
@@ -279,13 +284,13 @@ class GameAdmin(admin.ModelAdmin):
     search_fields = ("series__tournament__name", "series__team1__name", "series__team2__name")
     ordering = ("series", "game_no")
     autocomplete_fields = ("series", "blue_side", "red_side", "winner")
-    readonly_fields = ("created_at", "updated_at", "winner")
+    readonly_fields = ("created_at", "updated_at")
     fieldsets = (
-        (None, {"fields": ("series", "game_no", "blue_side", "red_side", "duration_display", "vod_link")}),
-        ("Results", {"fields": ("result_type", "winner",)}),
+        (None, {"fields": ("series", "game_no", "blue_side", "red_side", "result_type", "duration", "vod_link")}),
+        ("Results", {"fields": ("winner",)}),
         ("Timestamps", {"classes": ("collapse",), "fields": ("created_at", "updated_at")}),
     )
-    inlines = [GameDraftActionInline, TeamGameStatInline, PlayerGameStatInline]
+    inlines = [TeamGameStatInline, PlayerGameStatInline, GameDraftActionInline]
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
@@ -304,21 +309,13 @@ class GameAdmin(admin.ModelAdmin):
 
 @admin.register(TeamGameStat)
 class TeamGameStatAdmin(admin.ModelAdmin):
-    list_display = ("game", "team", "tower_destroyed", "lord_kills", "turtle_kills", "orange_buff", "purple_buff", "game_result", "score")
+    list_display = ("game", "team", "k", "d", "a", "turret_destroyed", "lord_kills", "turtle_kills", "game_win")
     list_filter = ("team", "game__series__tournament")
     search_fields = ("game__series__tournament__name", "team__name", "team__short_name")
     ordering = ("-game__series__scheduled_date", "team__short_name")
     autocomplete_fields = ("game", "team")
-    readonly_fields = ("created_at", "updated_at")
-    fieldsets = (
-        (None, {"fields": ("game", "team", "side", "game_result", "score")}),
-        ("Stats", {"fields": ("gold", "tower_destroyed", "lord_kills", "turtle_kills", "orange_buff", "purple_buff")}),
-        ("Timestamps", {"classes": ("collapse",), "fields": ("created_at", "updated_at")}),
-    )
+    readonly_fields = ("gold",)
 
-    def get_queryset(self, request):
-        qs = super().get_queryset(request)
-        return qs.select_related("game", "team", "game__series", "game__series__tournament")
 
 @admin.register(PlayerGameStat)
 class PlayerGameStatAdmin(admin.ModelAdmin):
@@ -332,13 +329,12 @@ class PlayerGameStatAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         qs = super().get_queryset(request)
 
+        minutes = ExpressionWrapper(
+            Coalesce(F('game__duration'), F("team_stat__game__duration")),
+            output_field=DurationField()
+        )
         return qs.annotate(
-            _minutes_sec=Coalesce(
-                F("game__duration"),
-                F("team_stat__game__duration"),
-                Value(None),
-                output_field=DurationField()
-            ),
+            _minutes_sec=Coalesce((F("game__duration"), F("team_stat__game__duration"))),
             _kills=Coalesce(F("k"), 0),
             _deaths=Coalesce(F("d"), 0),
             _assists=Coalesce(F("a"), 0),

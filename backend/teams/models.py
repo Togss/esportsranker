@@ -67,4 +67,4 @@ class Team(SluggedModel, TimeStampedModel):
         ]
 
     def __str__(self):
-        return f"{self.short_name} ({self.region})"
+        return f"{self.short_name}"
