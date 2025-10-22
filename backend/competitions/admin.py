@@ -5,6 +5,8 @@ from django.db.models.functions import Coalesce
 from django.utils.html import format_html
 from datetime import timedelta
 from django.core.exceptions import ValidationError
+from django.forms.models import BaseInlineFormSet
+from django.db import transaction
 
 from competitions.models import (
     Tournament, Stage, Series, Game,
@@ -24,30 +26,117 @@ class StageInline(admin.TabularInline):
 
 class TeamGameStatInline(admin.TabularInline):
     model = TeamGameStat
-    extra = 2
-    autocomplete_fields = ("team",)
-    fields = ("team", "side", "gold", "tower_destroyed", "lord_kills", "turtle_kills", "orange_buff", "purple_buff", "game_result", "score")
-    ordering = ("team__short_name",)
-
-
-class PlayerGameStatInline(admin.TabularInline):
-    model = PlayerGameStat
+    can_delete = False
     extra = 0
-    autocomplete_fields = ("player", "hero")
+    max_num = 2
     fields = (
-        "player", "team", "hero",
-        "k", "d", "a",
-        "gold", "dmg_dealt", "dmg_taken"
+        "team", "side", "game_result", "gold", "score",
+        "tower_destroyed",
+        "lord_kills", "turtle_kills", 
+        "orange_buff",
+        "purple_buff",
     )
-    ordering = ("player__ign",)
+    readonly_fields = ("team", "side")
+    verbose_name_plural = "Team Game Stats (Blue/Red Side)"
+
+    def get_formset(self, request, obj=None, **kwargs):
+        self._parent_obj = obj
+        return super().get_formset(request, obj, **kwargs)
+    
+    def clean(self):
+        super().clean()
+        if not getattr(self, "_parent_obj", None):
+            return
+        rows = [f.cleaned_data for f in self.forms if hasattr(f, "cleaned_data") and f.cleaned_data and not f.cleaned_data.get("DELETE", False)]
+        if len(rows) != 2:
+            raise ValidationError("You must enter stats for both teams (Blue and Red side).")
+        
+
+class _BaseSideFormSet(BaseInlineFormSet):
+    SIDE = None
+
+    def _side_team(self):
+        game = self.instance
+        return game.blue_side if self.SIDE == "BLUE" else game.red_side
+    
+    def _side_teamstat(self):
+        game = self.instance
+        team = self._side_team()
+
+        tgs, _ = TeamGameStat.objects.get_or_create(
+            game=game,
+            team=team,
+            defaults={"side": self.SIDE}
+        )
+        return tgs
+    
+    def save_new(self, form, commit=True):
+        obj = super().save_new(form, commit=False)
+        obj.game = self.instance
+        obj.team = self._side_team()
+        obj.team_stat = self._side_teamstat()
+        if commit:
+            obj.save()
+        return obj
+
+    def save_existing(self, form, instance, commit=True):
+        instance.game = self.instance
+        instance.team = self._side_team()
+        instance.team_stat = self._side_teamstat()
+        return super().save_existing(form, instance, commit)
+    
+    def clean(self):
+        super().clean()
+        count = 0
+        for form in self.forms:
+            cd = getattr(form, "cleaned_data", None)
+            if not cd or cd.get("DELETE"):
+                continue
+
+            if any(cd.get(f) for f in (
+                "player", "hero",
+                "k", "d", "a",
+                "gold", "dmg_dealt", "dmg_taken", "is_MVP"
+            )):
+                count += 1
+        if count > 5:
+            raise ValidationError("You can only enter stats for up to 5 players per team.")
+        
+class BlueSideFormSet(_BaseSideFormSet):
+    SIDE = "BLUE"
+
+class RedSideFormSet(_BaseSideFormSet):
+    SIDE = "RED"
+
+class _BasePlayerStatInline(admin.TabularInline):
+    model = PlayerGameStat
+    can_delete = True
+    extra = 5
+    max_num = 5
+    exclude = ("team_stat", "team")
+    fields = (
+        "player", "role", "hero",
+        "k", "d", "a",
+        "gold", "dmg_dealt", "dmg_taken", "is_MVP"
+    )
+
+class BlueSidePlayerStatInline(_BasePlayerStatInline):
+    verbose_name_plural = "Blue Side Player Game Stats"
+    formset = BlueSideFormSet
+
+class RedSidePlayerStatInline(_BasePlayerStatInline):
+    verbose_name_plural = "Red Side Player Game Stats"
+    formset = RedSideFormSet
 
 
 class GameDraftActionInline(admin.TabularInline):
     model = GameDraftAction
-    extra = 0
-    autocomplete_fields = ("player", "hero")
-    fields = ("order", "side", "action", "hero", "player", "team")
+    extra = 10
+    max_num = 20
+    fields = ("action", "side", "order", "hero", "player")
     ordering = ("order",)
+    verbose_name_plural = "Draft Actions (Ban/Pick Order)"
+
 
 class TournamentTeamInline(admin.TabularInline):
     model = TournamentTeam
@@ -201,26 +290,20 @@ class GameAdminForm(forms.ModelForm):
         model = Game
         fields = "__all__"
         widgets = {
-            "duration": forms.HiddenInput(),  # hide original duration field
+            "duration": forms.HiddenInput(),
         }
 
-    # Nice text field for MM:SS entry
-    duration_display = forms.CharField(
-        required=False,
-        label="Duration (MM:SS)",
-        help_text="Enter duration as minutes:seconds (e.g., 25:30)."
-    )
-
+    duration_display = forms.CharField(label="Duration (MM:SS)", required=False, help_text="Enter duration in minutes and seconds (e.g., 25:30 for 25 minutes and 30 seconds).")
+    
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-
-        # --- Prefill MM:SS when editing ---
+        # Pre-fill MM:SS from duration
         if self.instance and self.instance.duration:
             total_seconds = int(self.instance.duration.total_seconds())
             minutes, seconds = divmod(total_seconds, 60)
             self.fields["duration_display"].initial = f"{minutes:02d}:{seconds:02d}"
 
-        # --- Limit blue/red/winner to the two series teams ---
+        # Limit blue/red/winner to the series teams
         series = self.instance.series if (self.instance and self.instance.pk) else None
         if not series:
             sid = self.data.get("series") or self.initial.get("series")
@@ -229,7 +312,6 @@ class GameAdminForm(forms.ModelForm):
                     series = Series.objects.select_related("team1", "team2").get(pk=sid)
                 except Series.DoesNotExist:
                     series = None
-
         if series:
             teams_qs = Team.objects.filter(pk__in=[series.team1_id, series.team2_id])
             if "blue_side" in self.fields:
@@ -238,35 +320,36 @@ class GameAdminForm(forms.ModelForm):
                 self.fields["red_side"].queryset = teams_qs
             if "winner" in self.fields:
                 self.fields["winner"].queryset = teams_qs
-                self.fields["winner"].help_text = "Pick the winner (one of the two sides)."
+                self.fields["winner"].help_text = f"Select the winning team ({series.team1.short_name} or {series.team2.short_name})."
 
-        # Optional: nicer input UX
+        # Improve input UX
         self.fields["duration_display"].widget.attrs.update({
             "placeholder": "MM:SS",
-            "pattern": r"^\d{1,3}:\d{2}$",  # up to 999:59
-            "inputmode": "numeric",
+            "pattern": r"^\d{1,3}:\d{2}$",
+            "inputmode:": "numeric",
         })
 
     def clean_duration_display(self):
         value = (self.cleaned_data.get("duration_display") or "").strip()
         if value == "":
-            # Allow blank (means no duration / clear duration)
             return None
         parts = value.split(":")
         if len(parts) != 2:
-            raise ValidationError("Invalid format. Use MM:SS (e.g., 23:45).")
+            raise ValidationError("Duration must be in MM:SS format.")
         try:
             minutes = int(parts[0])
             seconds = int(parts[1])
+            if seconds < 0 or seconds >= 60 or minutes < 0:
+                raise ValueError
         except ValueError:
-            raise ValidationError("Minutes and seconds must be numbers.")
+            raise ValidationError("Invalid duration format. Please enter valid minutes and seconds.")
         if not (0 <= seconds <= 59):
-            raise ValidationError("Seconds must be between 00 and 59.")
+            raise ValidationError("Seconds must be between 0 and 59.")
         return timedelta(minutes=minutes, seconds=seconds)
-
+    
     def save(self, commit=True):
         has_display = "duration_display" in self.cleaned_data
-        display_val = self.cleaned_data.get("duration_display", None)
+        display_val = self.cleaned_data.get("duration_display")
         if has_display and display_val is not None:
             self.instance.duration = display_val
         return super().save(commit=commit)
@@ -274,95 +357,140 @@ class GameAdminForm(forms.ModelForm):
 @admin.register(Game)
 class GameAdmin(admin.ModelAdmin):
     form = GameAdminForm
-    list_display = ("series", "game_no", "blue_side", "red_side", "formatted_duration", "winner")
-    list_filter = ("series__tournament", "series__stage", "blue_side", "red_side", "result_type")
-    search_fields = ("series__tournament__name", "series__team1__name", "series__team2__name")
-    ordering = ("series", "game_no")
-    autocomplete_fields = ("series", "blue_side", "red_side", "winner")
-    readonly_fields = ("created_at", "updated_at", "winner")
-    fieldsets = (
-        (None, {"fields": ("series", "game_no", "blue_side", "red_side", "duration_display", "vod_link")}),
-        ("Results", {"fields": ("result_type", "winner",)}),
-        ("Timestamps", {"classes": ("collapse",), "fields": ("created_at", "updated_at")}),
+    list_display = (
+        "series", "game_no",
+        "blue_side", "red_side", "duration", "winner"
     )
-    inlines = [GameDraftActionInline, TeamGameStatInline, PlayerGameStatInline]
+    list_filter = ("series__tournament", "series__stage", "result_type")
+    search_fields = (
+        "series__team1__name", "series__team1__short_name",
+        "series__team2__name", "series__team2__short_name",
+    )
+    fields = (
+        "series",
+        "game_no",
+        "blue_side",
+        "red_side",
+        "result_type",
+        "winner",
+        "duration_display",
+        "vod_link",
+    )
+    inlines = [
+        GameDraftActionInline,
+        TeamGameStatInline,
+        BlueSidePlayerStatInline,
+        RedSidePlayerStatInline,
+    ]
 
-    def get_queryset(self, request):
-        qs = super().get_queryset(request)
-        return qs.select_related("series", "series__tournament", "series__stage", "blue_side", "red_side", "winner")
+    def save_model(self, request, obj, form, change):
+        # On first save, create the two TeamGameStat rows (Blue/Red) so that inlines can link to them
+        is_creating = obj.pk is None
+        super().save_model(request, obj, form, change)
+        if is_creating and obj.blue_side_id and obj.red_side_id:
+            def _after_commit():
+                TeamGameStat.objects.get_or_create(
+                    game=obj,
+                    team_id=obj.blue_side_id,
+                    defaults={"side": "BLUE"}
+                )
+                TeamGameStat.objects.get_or_create(
+                    game=obj,
+                    team_id=obj.red_side_id,
+                    defaults={"side": "RED"}
+                )
+            transaction.on_commit(_after_commit)
 
-    @admin.display(description="Duration")
-    def formatted_duration(self, obj: Game):
-        if not obj.duration:
-            return "—"
-        total_seconds = int(obj.duration.total_seconds())
-        minutes, seconds = divmod(total_seconds, 60)
-        return f"{minutes:02}:{seconds:02}"
-         
+    def save_formset(self, request, form, formset, change):
+        super().save_formset(request, form, formset, change)
 
-# ----- Flat admins (if you ever open these pages directly) -----
+        if isinstance(formset, (BlueSideFormSet, RedSideFormSet)):
+            game = form.instance
+
+            blue_count = PlayerGameStat.objects.filter(
+                game=game,
+                team_stat__side="BLUE"
+            ).count()
+            red_count = PlayerGameStat.objects.filter(
+                game=game,
+                team_stat__side="RED"
+            ).count()
+
+            setattr(self, "_defer_player_count_check", True)
+            setattr(self, "_last_game_for_count", game)
+    
+    def response_add(self, request, obj, post_url_continue=None):
+        self._final_check_10_players(obj)
+        return super().response_add(request, obj, post_url_continue)
+    
+    def response_change(self, request, obj):
+        self._final_check_10_players(obj)
+        return super().response_change(request, obj)
+    
+    def _final_check_10_players(self, game):
+        if not getattr(self, "_defer_player_count_check", False):
+            return
+        blue_count = PlayerGameStat.objects.filter(
+            game=game,
+            team_stat__side="BLUE"
+        ).count()
+        red_count = PlayerGameStat.objects.filter(
+            game=game,
+            team_stat__side="RED"
+        ).count()
+        if blue_count != 5 or red_count !=5:
+            from django.contrib import messages
+            messages.error(
+                self.request,
+                f"Player Stats Incomplete: Blue Side has {blue_count}/5 players, Red Side has {red_count}/5 players. Please ensure each side has exactly 5 player stats entered."
+            )
+
+            self._defer_player_count_check = False
+            self._last_game_for_count = None
+
+# ---------- Read-Only Admins for Stats/Draft ----------
+def _readonly_fields_for(model):
+    # all model fields become read-only in the change view
+    return [f.name for f in model._meta.fields] + [m.name for m in model._meta.many_to_many]
 
 @admin.register(TeamGameStat)
-class TeamGameStatAdmin(admin.ModelAdmin):
-    list_display = ("game", "team", "tower_destroyed", "lord_kills", "turtle_kills", "orange_buff", "purple_buff", "game_result", "score")
-    list_filter = ("team", "game__series__tournament")
-    search_fields = ("game__series__tournament__name", "team__name", "team__short_name")
-    ordering = ("-game__series__scheduled_date", "team__short_name")
-    autocomplete_fields = ("game", "team")
-    readonly_fields = ("created_at", "updated_at")
-    fieldsets = (
-        (None, {"fields": ("game", "team", "side", "game_result", "score")}),
-        ("Stats", {"fields": ("gold", "tower_destroyed", "lord_kills", "turtle_kills", "orange_buff", "purple_buff")}),
-        ("Timestamps", {"classes": ("collapse",), "fields": ("created_at", "updated_at")}),
-    )
+class TeamGameStatReadonlyAdmin(admin.ModelAdmin):
+    list_display = ('game', 'team', 'side', 'game_result', 'gold', 'score',
+                    'tower_destroyed', 'lord_kills', 'turtle_kills',
+                    'orange_buff', 'purple_buff')
+    list_filter = ('side', 'game_result', 'game__series__tournament', 'game__series')
+    search_fields = ('game__series__tournament__name', 'team__name')
+    ordering = ('game', 'team')
 
-    def get_queryset(self, request):
-        qs = super().get_queryset(request)
-        return qs.select_related("game", "team", "game__series", "game__series__tournament")
+    def has_add_permission(self, request): return False
+    def has_change_permission(self, request, obj=None): return False
+    def has_delete_permission(self, request, obj=None): return False
+    def get_readonly_fields(self, request, obj=None):
+        return _readonly_fields_for(TeamGameStat)
 
 @admin.register(PlayerGameStat)
-class PlayerGameStatAdmin(admin.ModelAdmin):
-    list_display = ("player", "team", "game", "hero", "k", "d", "a",
-                    "gold", "dmg_dealt", "dmg_taken", "kda_for_list", "gpm_for_list", "dpm_for_list")
-    list_filter = ("team", "hero", "player", "game__series__tournament")
-    search_fields = ("player__ign", "player__name", "hero__name", "team__short_name", "team__name")
-    ordering = ("-game__series__scheduled_date", "player__ign")
-    autocomplete_fields = ("game", "team", "player", "hero")
+class PlayerGameStatReadonlyAdmin(admin.ModelAdmin):
+    list_display = ('game', 'team', 'player', 'role', 'hero', 'k', 'd', 'a',
+                    'gold', 'dmg_dealt', 'dmg_taken', 'is_MVP')
+    list_filter = ('role', 'team', 'game__series__tournament', 'game__series')
+    search_fields = ('player__name', 'game__series__tournament__name', 'team__name')
+    ordering = ('game', 'team', 'player')
 
-    def get_queryset(self, request):
-        qs = super().get_queryset(request)
-
-        return qs.annotate(
-            _minutes_sec=Coalesce(
-                F("game__duration"),
-                F("team_stat__game__duration"),
-                Value(None),
-                output_field=DurationField()
-            ),
-            _kills=Coalesce(F("k"), 0),
-            _deaths=Coalesce(F("d"), 0),
-            _assists=Coalesce(F("a"), 0),
-            _gold=Coalesce(F("gold"), 0),
-            _dmg=Coalesce(F("dmg_dealt"), 0),
-        )
-    
-    @admin.display(description="KDA")
-    def kda_for_list(self, obj):
-        return f"{obj.kda_rate}"
-    
-    @admin.display(description="GPM")
-    def gpm_for_list(self, obj):
-        return f"{obj.gpm}"
-    
-    @admin.display(description="DPM")
-    def dpm_for_list(self, obj):
-        return f"{obj.dpm}"
-
+    def has_add_permission(self, request): return False
+    def has_change_permission(self, request, obj=None): return False
+    def has_delete_permission(self, request, obj=None): return False
+    def get_readonly_fields(self, request, obj=None):
+        return _readonly_fields_for(PlayerGameStat)
 
 @admin.register(GameDraftAction)
-class GameDraftActionAdmin(admin.ModelAdmin):
-    list_display = ("game", "order", "side", "action", "hero", "player", "team")
-    list_filter = ("side", "action", "hero", "game__series__tournament")
-    search_fields = ("game__series__tournament__name", "hero__name", "player__ign", "team__short_name")
-    ordering = ("game", "order")
-    autocomplete_fields = ("game", "hero", "player", "team")
+class GameDraftActionReadonlyAdmin(admin.ModelAdmin):
+    list_display = ('game', 'order', 'action', 'side', 'hero', 'player')
+    list_filter = ('action', 'side', 'game__series__tournament', 'game__series')
+    search_fields = ('hero__name', 'player__name', 'game__series__tournament__name')
+    ordering = ('game', 'order')
+
+    def has_add_permission(self, request): return False
+    def has_change_permission(self, request, obj=None): return False
+    def has_delete_permission(self, request, obj=None): return False
+    def get_readonly_fields(self, request, obj=None):
+        return _readonly_fields_for(GameDraftAction)
