@@ -3,8 +3,8 @@ from django.db.models.functions import Coalesce
 from rest_framework import viewsets, permissions, filters
 from django_filters.rest_framework import DjangoFilterBackend
 
-from players.models import Player, PlayerMembership
-from teams.models import Team
+from apps.players.models import Player, PlayerMembership
+from apps.teams.models import Team
 from .serializers import PlayerSerializer
 
 class PlayerViewSet(viewsets.ReadOnlyModelViewSet):

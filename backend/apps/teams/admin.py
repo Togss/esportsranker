@@ -4,7 +4,7 @@ from django.utils import timezone
 from django.db import models
 from django.db.models import OuterRef, Exists, Q
 from .models import Team
-from players.models import PlayerMembership, Player
+from apps.players.models import PlayerMembership, Player
 
 class TeamMembershipInline(admin.TabularInline):
     model = PlayerMembership

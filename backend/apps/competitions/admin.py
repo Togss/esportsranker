@@ -10,11 +10,11 @@ from django.db import transaction
 from django.http import JsonResponse
 from django.urls import path
 
-from competitions.models import (
+from apps.competitions.models import (
     Tournament, Stage, Series, Game,
     TeamGameStat, PlayerGameStat, GameDraftAction, TournamentTeam
 )
-from teams.models import Team
+from apps.teams.models import Team
 
 
 # ---------- Inlines ----------

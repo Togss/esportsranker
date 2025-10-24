@@ -1,6 +1,6 @@
 from django.db import models
 from django.core.exceptions import ValidationError
-from common.models import TimeStampedModel, SluggedModel
+from apps.common.models import TimeStampedModel, SluggedModel
 
 CLASS_CHOICES = [
     ('TANK', 'Tank'),

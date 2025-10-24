@@ -1,6 +1,7 @@
 from django.apps import AppConfig
 
 
-class CommonConfig(AppConfig):
+class TeamsConfig(AppConfig):
     default_auto_field = 'django.db.models.BigAutoField'
-    name = 'common'
+    name = 'apps.teams'
+    verbose_name = 'Teams'

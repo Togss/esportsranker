@@ -5,11 +5,11 @@ import django.db.models as dj_models
 from django.utils import timezone
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from common.models import TimeStampedModel, SluggedModel
-from teams.models import Team
-from heroes.models import Hero
+from apps.common.models import TimeStampedModel, SluggedModel
+from apps.teams.models import Team
+from apps.heroes.models import Hero
 from decimal import Decimal, ROUND_HALF_UP
-from common.slug_helper import ensure_unique_slug, build_stage_slug_base
+from apps.common.slug_helper import ensure_unique_slug, build_stage_slug_base
 
 class TournamentTeam(models.Model):
     INVITED = "INVITED"

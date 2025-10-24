@@ -31,15 +31,14 @@ INSTALLED_APPS = [
     'django_filters',
 
     # Esports Ranker Apps
-    'accounts',
-    'teams',
-    'players',
-    'rankings',
-    'ingest',
-    'common',
-    'heroes',
-
-    'competitions.apps.CompetitionsConfig',
+    'apps.accounts',
+    'apps.teams',
+    'apps.players',
+    'apps.rankings',
+    'apps.ingest',
+    'apps.common',
+    'apps.heroes',
+    'apps.competitions',
 ]
 
 MIDDLEWARE = [

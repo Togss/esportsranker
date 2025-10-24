@@ -1,7 +1,7 @@
 from django.db import models
 from django.db.models import Q
 from django.core.validators import MinValueValidator, MaxValueValidator, MinLengthValidator, RegexValidator
-from common.models import TimeStampedModel, SluggedModel
+from apps.common.models import TimeStampedModel, SluggedModel
 
 REGION_CHOICES = [
     ('NA', 'North America'),

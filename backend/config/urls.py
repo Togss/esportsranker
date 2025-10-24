@@ -8,9 +8,9 @@ urlpatterns = [
     path('admin/', admin.site.urls),
 
     #API (v1)
-    path('api/v1/', include('teams.urls')),
-    path('api/v1/', include('players.urls')),
-    path('api/v1/', include('heroes.urls')),
+    path('api/v1/', include('apps.teams.urls')),
+    path('api/v1/', include('apps.players.urls')),
+    path('api/v1/', include('apps.heroes.urls')),
 
     #API Schema and Docs
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
