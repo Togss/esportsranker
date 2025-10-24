@@ -7,6 +7,8 @@ from datetime import timedelta
 from django.core.exceptions import ValidationError
 from django.forms.models import BaseInlineFormSet
 from django.db import transaction
+from django.http import JsonResponse
+from django.urls import path
 
 from competitions.models import (
     Tournament, Stage, Series, Game,
