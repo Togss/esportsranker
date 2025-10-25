@@ -1,5 +1,7 @@
 from django.db import models
 from django.core.exceptions import ValidationError
+from django.db.models import UniqueConstraint
+from django.db.models.functions import Lower
 from apps.common.models import TimeStampedModel, SluggedModel
 
 CLASS_CHOICES = [
@@ -16,8 +18,15 @@ def hero_icon_upload_to(instance, filename: str) -> str:
     return f'heroes/icons/{instance.slug}{ext}'
 
 class Hero(SluggedModel, TimeStampedModel):
-    primary_class = models.CharField(max_length=20, choices=CLASS_CHOICES, db_index=True)
-    secondary_class = models.CharField(max_length=20, choices=CLASS_CHOICES, blank=True, null=True)
+    primary_class = models.CharField(
+        max_length=20, choices=CLASS_CHOICES,
+        db_index=True
+    )
+    secondary_class = models.CharField(
+        max_length=20, choices=CLASS_CHOICES,
+        blank=True, null=True,
+        db_index=True
+    )
     hero_icon = models.ImageField(upload_to=hero_icon_upload_to, blank=True, null=True)
 
     class Meta:
@@ -26,10 +35,16 @@ class Hero(SluggedModel, TimeStampedModel):
         verbose_name_plural = 'Heroes'
         indexes = [
             models.Index(fields=['primary_class']),
-            models.Index(fields=['name']),
         ]
         constraints = [
-            models.CheckConstraint(check=~models.Q(slug=''), name='hero_slug_not_empty'),
+            models.CheckConstraint(
+                check=~models.Q(slug=''),
+                name='hero_slug_name_not_empty'
+            ),
+            UniqueConstraint(
+                Lower('name'),
+                name='unique_hero_name_ci_unique'
+            ),
         ]
 
     def clean(self):

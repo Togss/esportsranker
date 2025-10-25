@@ -33,14 +33,24 @@ SHORT_NAME_VALIDATOR = RegexValidator(
 
 def team_logo_upload_to(instance, filename):
     ext = f'.{filename.rsplit(".", 1)[-1].lower()}' if "." in filename else ""
-    return f'team_logos/{instance.slug}{ext}'
+    base = (instance.slug or instance.name).lower().replace(" ", "_")
+    return f'team_logos/{base}{ext}' if ext else f'team_logos/{base}'
 
 class Team(SluggedModel, TimeStampedModel):
-    short_name = models.CharField(max_length=10, unique=True, validators=[SHORT_NAME_VALIDATOR, MinLengthValidator(2)])
+    short_name = models.CharField(
+        max_length=10,
+        unique=True,
+        validators=[SHORT_NAME_VALIDATOR, MinLengthValidator(2)],
+        help_text='Abbreviated team name (2-10 uppercase letters/numbers).',
+        db_index=True,
+    )
     region = models.CharField(max_length=5, choices=REGION_CHOICES)
     logo = models.ImageField(upload_to=team_logo_upload_to, blank=True, null=True)
     achievements = models.TextField(blank=True)
-    founded_year = models.PositiveIntegerField(blank=True, null=True, validators=[MinValueValidator(1850), MaxValueValidator(2100)])
+    founded_year = models.PositiveIntegerField(
+        blank=True, null=True, validators=[MinValueValidator(1850), MaxValueValidator(2100)],
+        help_text='Year the team was founded (between 1850 and 2100).'
+    )
     is_active = models.BooleanField(default=True)
     description = models.TextField(blank=True)
     website = models.URLField(blank=True)
@@ -51,14 +61,12 @@ class Team(SluggedModel, TimeStampedModel):
     class Meta:
         ordering = ['short_name']
         indexes = [
-            models.Index(fields=['is_active']),
-            models.Index(fields=['founded_year']),
             models.Index(fields=['region', 'is_active']),
         ]
         constraints = [
-            models.CheckConstraint(
-                name='team_slug_not_empty',
-                check=~Q(slug='')
+            models.UniqueConstraint(
+                fields=['short_name'],
+                name='unique_team_short_name_ci_unique',
             ),
             models.CheckConstraint(
                 name='founded_year_valid_range',

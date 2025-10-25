@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     'apps.common',
     'apps.heroes',
     'apps.competitions',
+    'apps.staff',
 ]
 
 MIDDLEWARE = [

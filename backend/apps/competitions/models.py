@@ -39,7 +39,10 @@ class TournamentTeam(models.Model):
     class Meta:
         ordering = ["seed", "team__short_name"]
         constraints = [
-            models.UniqueConstraint(fields=["tournament", "team"], name="unique_tournament_team"),
+            models.UniqueConstraint(
+                fields=["tournament", "team"],
+                name="unique_tournament_team"
+            ),
         ]
 
     def __str__(self):
@@ -64,13 +67,33 @@ def tournament_logo_upload_to(instance, filename: str) -> str:
     return f'tournament/logos/{instance.slug}{ext}'
 
 class Tournament(SluggedModel, TimeStampedModel):
-    region = models.CharField(max_length=5, choices=Team._meta.get_field('region').choices, db_index=True)
-    tier = models.CharField(max_length=2, choices=TIER_CHOICES, db_index=True)
+    region = models.CharField(
+        max_length=5,
+        choices=Team._meta.get_field('region').choices, db_index=True
+    )
+    tier = models.CharField(
+        max_length=2,
+        choices=TIER_CHOICES,
+        db_index=True
+    )
     start_date = models.DateField(db_index=True)
     end_date = models.DateField(db_index=True)
-    status = models.CharField(max_length=10, choices=STATUS_CHOICES, db_index=True)
-    teams = models.ManyToManyField('teams.Team', through='competitions.TournamentTeam', related_name='tournaments', blank=True, help_text="Teams participating in the tournament")
-    prize_pool = models.PositiveIntegerField(blank=True, null=True, help_text="Prize pool in USD")
+    status = models.CharField(
+        max_length=10,
+        choices=STATUS_CHOICES,
+        db_index=True
+    )
+    teams = models.ManyToManyField(
+        'teams.Team',
+        through='competitions.TournamentTeam',
+        related_name='tournaments',
+        blank=True,
+        help_text="Teams participating in the tournament"
+    )
+    prize_pool = models.PositiveIntegerField(
+        blank=True, null=True,
+        help_text="Prize pool in USD"
+    )
     logo = models.ImageField(upload_to=tournament_logo_upload_to, blank=True, null=True)
     description = models.TextField(blank=True)
     tournament_rules_link = models.URLField(blank=True, help_text="Link to the tournament rules")
@@ -83,11 +106,8 @@ class Tournament(SluggedModel, TimeStampedModel):
             models.Index(fields=['region']),
             models.Index(fields=['tier']),
             models.Index(fields=['status']),
-            models.Index(fields=['start_date']),
-            models.Index(fields=['end_date']),
             models.Index(fields=['region', 'status']),
             models.Index(fields=['tier', 'status']),
-            models.Index(fields=['start_date', 'end_date']),
         ]
         constraints = [
             models.CheckConstraint(check=~Q(slug=''), name='tournament_slug_not_empty'),
@@ -259,12 +279,16 @@ class Series(TimeStampedModel):
     def compute_score_and_winner(self, persist: bool = True):
         from .services import compute_series_score_and_winner
         score_str, winner = compute_series_score_and_winner(self)
+        winner_id = winner.id if winner else None
 
-        if persist and (self.score != score_str or self.winner.id != (winner.id if winner else None)):
-            type(self).objects.filter(pk=self.pk).update(score=score_str, winner=winner)
-            self.score = score_str
-            self.winner = winner
-
+        if persist and self.pk:
+            if self.score != score_str or self.winner_id != winner_id:
+                type(self).objects.filter(pk=self.pk).update(
+                    score=score_str,
+                    winner_id=winner_id,
+                )
+                self.score = score_str
+                self.winner_id = winner_id
         return score_str, winner
 
     def clean(self):
@@ -278,6 +302,20 @@ class Series(TimeStampedModel):
 
         if self.team1_id and self.team2_id and self.team1_id == self.team2_id:
             errors['team2'] = "Team 2 must be different from Team 1."
+
+        if self.tournament_id and self.team1_id:
+            if not TournamentTeam.objects.filter(
+                tournament_id=self.tournament_id,
+                team_id=self.team1_id
+            ).exists():
+                errors['team1'] = "Team 1 is not registered in this tournament."
+
+        if self.tournament_id and self.team2_id:
+            if not TournamentTeam.objects.filter(
+                tournament_id=self.tournament_id,
+                team_id=self.team2_id
+            ).exists():
+                errors['team2'] = "Team 2 is not registered in this tournament."
 
         if errors:
             raise ValidationError(errors)

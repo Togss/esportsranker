@@ -18,11 +18,38 @@ from apps.teams.models import Team
 
 
 # ---------- Inlines ----------
+class SeriesInline(admin.TabularInline):
+    model = Series
+    extra = 0
+    fields = (
+        "team1",
+        "team2",
+        "best_of",
+        "scheduled_date",
+        "score",
+        "winner"
+    )
+    ordering = ("-scheduled_date",)
+    show_change_link = True
+    readonly_fields = ("score", "winner")
+    autocomplete_fields = ("team1", "team2", "winner")
+    verbose_name_plural = "Series in this Stage"
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.select_related("team1", "team2", "winner")
 
 class StageInline(admin.TabularInline):
     model = Stage
     extra = 0
-    fields = ("stage_type", "variant", "order", "tier", "start_date", "end_date")
+    fields = (
+        "stage_type",
+        "variant",
+        "order",
+        "tier",
+        "start_date",
+        "end_date"
+    )
     ordering = ("order",)
     show_change_link = True
 
@@ -32,9 +59,14 @@ class TeamGameStatInline(admin.TabularInline):
     extra = 0
     max_num = 2
     fields = (
-        "team", "side", "game_result", "gold", "score",
+        "team",
+        "side",
+        "game_result",
+        "gold",
+        "score",
         "tower_destroyed",
-        "lord_kills", "turtle_kills", 
+        "lord_kills",
+        "turtle_kills",
         "orange_buff",
         "purple_buff",
     )
@@ -96,9 +128,15 @@ class _BaseSideFormSet(BaseInlineFormSet):
                 continue
 
             if any(cd.get(f) for f in (
-                "player", "hero",
-                "k", "d", "a",
-                "gold", "dmg_dealt", "dmg_taken", "is_MVP"
+                "player",
+                "hero",
+                "k",
+                "d",
+                "a",
+                "gold",
+                "dmg_dealt",
+                "dmg_taken",
+                "is_MVP"
             )):
                 count += 1
         if count > 5:
@@ -117,9 +155,16 @@ class _BasePlayerStatInline(admin.TabularInline):
     max_num = 5
     exclude = ("team_stat", "team")
     fields = (
-        "player", "role", "hero",
-        "k", "d", "a",
-        "gold", "dmg_dealt", "dmg_taken", "is_MVP"
+        "player",
+        "role",
+        "hero",
+        "k",
+        "d",
+        "a",
+        "gold",
+        "dmg_dealt",
+        "dmg_taken",
+        "is_MVP"
     )
 
 class BlueSidePlayerStatInline(_BasePlayerStatInline):
@@ -135,7 +180,13 @@ class GameDraftActionInline(admin.TabularInline):
     model = GameDraftAction
     extra = 10
     max_num = 20
-    fields = ("action", "side", "order", "hero", "player")
+    fields = (
+        "action",
+        "side",
+        "order",
+        "hero",
+        "player"
+    )
     ordering = ("order",)
     verbose_name_plural = "Draft Actions (Ban/Pick Order)"
 
@@ -144,7 +195,13 @@ class TournamentTeamInline(admin.TabularInline):
     model = TournamentTeam
     extra = 0
     autocomplete_fields = ("team",)
-    fields = ("team", "seed", "kind", "group", "notes")
+    fields = (
+        "team",
+        "seed",
+        "kind",
+        "group",
+        "notes"
+    )
     ordering = ("seed", "team__short_name")
 
 
@@ -152,36 +209,72 @@ class TournamentTeamInline(admin.TabularInline):
 
 @admin.register(Tournament)
 class TournamentAdmin(admin.ModelAdmin):
-    list_display = ("logo_thumb", "name", "region", "team_count", "tier", "status", "start_date", "end_date")
-    list_filter = ("region", "tier", "status", "start_date")
+    list_display = (
+        "logo_thumb",
+        "name",
+        "region",
+        "team_count",
+        "tier",
+        "status",
+        "start_date",
+        "end_date"
+    )
+    list_filter = ("region", "tier", "status")
     search_fields = ("name", "slug")
     prepopulated_fields = {"slug": ("name",)}
     ordering = ("-start_date", "name")
-    readonly_fields = ("logo_preview", "status", "created_at", "updated_at")
+    readonly_fields = (
+        "logo_preview",
+        "status",
+        "created_at",
+        "updated_at"
+    )
     inlines = [StageInline, TournamentTeamInline]
 
     fieldsets = (
-        (None, {"fields": ("name", "slug", "region", "tier", "status")}),
-        ("Schedule", {"fields": ("start_date", "end_date")}),
-        ("Branding", {"fields": ("logo", "logo_preview")}),
-        ("Timestamps", {"classes": ("collapse",), "fields": ("created_at", "updated_at")}),
+        (None, {
+            "fields": (
+                "name", "slug", "region", "tier", "status"
+            )
+        }),
+        (
+            "Schedule", {
+                "fields": ("start_date", "end_date")
+            }),
+        (
+            "Branding", {
+                "fields": ("logo", "logo_preview")
+            }),
+        (
+            "Timestamps", {
+                "classes": ("collapse",), "fields": ("created_at", "updated_at")}),
     )
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        return qs.only("id", "name", "slug", "region", "tier", "status", "start_date", "end_date", "logo")
+        return qs.only()
 
     @admin.display(description="Logo")
     def logo_thumb(self, obj: Tournament):
-        if getattr(obj, "logo", None):
-            return format_html('<img src="{}" style="height:28px;width:28px;border-radius:4px;object-fit:cover;" />', obj.logo.url)
-        return "—"
+        if obj.logo:
+            return format_html(
+                '<img src="{}" style="height:28px;width:28px;border-radius:4px;object-fit:cover;" />',
+                obj.logo.url
+            )
+        return format_html(
+            '<div style="height:28px;width:28px;border-radius:4px;background-color:#ccc;display:flex;align-items:center;justify-content:center;color:#666;font-size:14px;">N/A</div>'
+        )
 
     @admin.display(description="Logo Preview")
     def logo_preview(self, obj: Tournament):
-        if getattr(obj, "logo", None):
-            return format_html('<img src="{}" style="max-height:120px;border-radius:8px;" />', obj.logo.url)
-        return "No logo"
+        if obj.logo:
+            return format_html(
+                '<img src="{}" style="max-height:120px;border-radius:8px;" />',
+                obj.logo.url
+            )
+        return format_html(
+            '<div style="height:120px;width:120px;border-radius:8px;background-color:#e0e0e0;display:flex;align-items:center;justify-content:center;color:#888;font-size:16px;">No Logo</div>'
+        )
     
     @admin.display(description="Number of Teams")
     def team_count(self, obj: Tournament):
@@ -194,13 +287,22 @@ def stage_title(obj: Stage):
 
 @admin.register(Stage)
 class StageAdmin(admin.ModelAdmin):
-    list_display = ("stage_type", "variant", "tournament", "order", "status", "start_date", "end_date")
+    list_display = (
+        "stage_type",
+        "variant",
+        "tournament",
+        "order",
+        "status",
+        "start_date",
+        "end_date"
+    )
     list_filter = ("tournament",)
     search_fields = ("stage_type", "variant", "tournament__name",)
     prepopulated_fields = {"slug": ("stage_type", "variant")}
     ordering = ("tournament__start_date", "order")
     autocomplete_fields = ("tournament",)
     readonly_fields = ("status", "created_at", "updated_at")
+    inlines = [SeriesInline]
     fieldsets = (
         (None, {"fields": ("tournament", "stage_type", "variant", "slug", "order", "tier")}),
         ("Schedule", {"fields": ("start_date", "end_date")}),
@@ -409,29 +511,25 @@ class GameAdmin(admin.ModelAdmin):
         if isinstance(formset, (BlueSideFormSet, RedSideFormSet)):
             game = form.instance
 
-            blue_count = PlayerGameStat.objects.filter(
-                game=game,
-                team_stat__side="BLUE"
-            ).count()
-            red_count = PlayerGameStat.objects.filter(
-                game=game,
-                team_stat__side="RED"
-            ).count()
+            self._defer_player_count_check = True
+            self._last_game_for_count = game
 
-            setattr(self, "_defer_player_count_check", True)
-            setattr(self, "_last_game_for_count", game)
-    
     def response_add(self, request, obj, post_url_continue=None):
-        self._final_check_10_players(obj)
+        self._final_check_10_players(request, obj)
         return super().response_add(request, obj, post_url_continue)
     
     def response_change(self, request, obj):
-        self._final_check_10_players(obj)
+        self._final_check_10_players(request, obj)
         return super().response_change(request, obj)
-    
-    def _final_check_10_players(self, game):
+
+    def _final_check_10_players(self, request, game):
         if not getattr(self, "_defer_player_count_check", False):
             return
+        
+        game = getattr(self, "_last_game_for_count", None)
+        if not game:
+            return
+        
         blue_count = PlayerGameStat.objects.filter(
             game=game,
             team_stat__side="BLUE"
@@ -440,6 +538,7 @@ class GameAdmin(admin.ModelAdmin):
             game=game,
             team_stat__side="RED"
         ).count()
+
         if blue_count != 5 or red_count !=5:
             from django.contrib import messages
             messages.error(
