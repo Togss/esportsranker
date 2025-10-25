@@ -668,7 +668,7 @@ class GameAdmin(admin.ModelAdmin):
         if blue_count != 5 or red_count !=5:
             from django.contrib import messages
             messages.error(
-                self.request,
+                request,
                 f"Player Stats Incomplete: Blue Side has {blue_count}/5 players, Red Side has {red_count}/5 players. Please ensure each side has exactly 5 player stats entered."
             )
 
