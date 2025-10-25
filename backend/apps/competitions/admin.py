@@ -22,6 +22,7 @@ class SeriesInline(admin.TabularInline):
     model = Series
     extra = 0
     fields = (
+        "match_summary",
         "team1",
         "team2",
         "best_of",
@@ -31,13 +32,22 @@ class SeriesInline(admin.TabularInline):
     )
     ordering = ("-scheduled_date",)
     show_change_link = True
-    readonly_fields = ("score", "winner")
+    readonly_fields = ("match_summary", "score")
     autocomplete_fields = ("team1", "team2", "winner")
     verbose_name_plural = "Series in this Stage"
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
         return qs.select_related("team1", "team2", "winner")
+    
+    @admin.display(description="Matchup")
+    def match_summary(self, obj: Series):
+        t1 = getattr(obj.team1, "short_name", str(obj.team1_id))
+        t2 = getattr(obj.team2, "short_name", str(obj.team2_id))
+        bo = f"Bo{obj.best_of}" if obj.best_of else "BoN"
+
+        return f"{t1} vs {t2} ({bo})".strip()
+    
 
 class StageInline(admin.TabularInline):
     model = Stage
@@ -227,33 +237,52 @@ class TournamentAdmin(admin.ModelAdmin):
         "logo_preview",
         "status",
         "created_at",
-        "updated_at"
+        "updated_at",
+        "stage_label",
     )
     inlines = [StageInline, TournamentTeamInline]
 
     fieldsets = (
         (None, {
             "fields": (
-                "name", "slug", "region", "tier", "status"
+                "name",
+                "slug",
+                "region",
+                "tier",
+                "status"
+            )
+        }),
+        ("Schedule", {
+            "fields": (
+                "start_date",
+                "end_date"
+            )
+        }),
+        ("Public Info", {
+            "fields": (
+                "description",
+                "rules_link",
+                "prize_pool"
+            )
+        }),
+        ("Branding", {
+            "fields": (
+                "logo",
+                "logo_preview"
             )
         }),
         (
-            "Schedule", {
-                "fields": ("start_date", "end_date")
-            }),
-        (
-            "Branding", {
-                "fields": ("logo", "logo_preview")
-            }),
-        (
             "Timestamps", {
-                "classes": ("collapse",), "fields": ("created_at", "updated_at")}),
+                "classes": ("collapse",),
+                "fields": (
+                    "created_at",
+                    "updated_at"
+                )
+            }
+        ),
     )
 
-    def get_queryset(self, request):
-        qs = super().get_queryset(request)
-        return qs.only()
-
+    # --- Custom Displays ---
     @admin.display(description="Logo")
     def logo_thumb(self, obj: Tournament):
         if obj.logo:
@@ -262,56 +291,153 @@ class TournamentAdmin(admin.ModelAdmin):
                 obj.logo.url
             )
         return format_html(
-            '<div style="height:28px;width:28px;border-radius:4px;background-color:#ccc;display:flex;align-items:center;justify-content:center;color:#666;font-size:14px;">N/A</div>'
+            '<div style="height:28px;width:28px;border-radius:4px;'
+            'background-color:#ccc;display:flex;align-items:center;justify-content:center;'
+            'color:#666;font-size:14px;">N/A</div>'
         )
-
+    
     @admin.display(description="Logo Preview")
     def logo_preview(self, obj: Tournament):
         if obj.logo:
             return format_html(
-                '<img src="{}" style="max-height:120px;border-radius:8px;" />',
+                '<img src="{}" style="max-height:120px;max-width:200px;border-radius:8px;object-fit:cover;" />',
                 obj.logo.url
             )
         return format_html(
-            '<div style="height:120px;width:120px;border-radius:8px;background-color:#e0e0e0;display:flex;align-items:center;justify-content:center;color:#888;font-size:16px;">No Logo</div>'
+            '<div style="height:120px;width:200px;border-radius:8px;'
+            'background-color:#ccc;display:flex;align-items:center;justify-content:center;'
+            'color:#666;font-size:18px;">No Logo Uploaded</div>'
         )
     
-    @admin.display(description="Number of Teams")
+    @admin.display(description="Teams")
     def team_count(self, obj: Tournament):
         return obj.teams.count()
+    
+    @admin.display(description="Stages")
+    def stage_label(self, obj: Tournament):
+        rows = (
+            obj.stages.all()
+            .order_by("order")
+            .values_list("stage_type", "variant")
+        )
+        if not rows:
+            return "—"
+      
+        type_map = dict(getattr(Stage, "STAGE_TYPES", []))
 
-@admin.display(description="Stage")
-def stage_title(obj: Stage):
-    type_label = dict(Stage.STAGE_TYPES).get(obj.stage_type, obj.stage_type)
-    return f'{type_label}{f" - {obj.variant}" if obj.variant else ""}'
-
+        labels = []
+        for stages_type, variant in rows:
+            base = type_map.get(stages_type, stages_type)
+            if variant:
+                labels.append(f"{base} - {variant}")
+            else:
+                labels.append(base)
+        return " • ".join(labels)
+    
+# ----- Stage Admin -----
 @admin.register(Stage)
 class StageAdmin(admin.ModelAdmin):
+    # What you see in the /admin/competitions/stage/ list view
     list_display = (
+        "stage_label",      # e.g. "Playoffs Stage - Upper Bracket"
+        "tournament",       # MPL PH S13
+        "order",            # 1, 2, 3...
+        "status",           # UPCOMING / ONGOING / COMPLETED
+        "start_date",
+        "end_date",
+    )
+
+    list_filter = (
+        "tournament",
+        "status",
+    )
+
+    search_fields = (
         "stage_type",
         "variant",
-        "tournament",
-        "order",
-        "status",
-        "start_date",
-        "end_date"
+        "tournament__name",
     )
-    list_filter = ("tournament",)
-    search_fields = ("stage_type", "variant", "tournament__name",)
-    prepopulated_fields = {"slug": ("stage_type", "variant")}
-    ordering = ("tournament__start_date", "order")
-    autocomplete_fields = ("tournament",)
-    readonly_fields = ("status", "created_at", "updated_at")
+
+    # Slug auto-fills from stage_type + variant while you're typing
+    prepopulated_fields = {
+        "slug": ("stage_type", "variant"),
+    }
+
+    # Order: First by tournament’s start date, then within that by "order"
+    ordering = (
+        "tournament__start_date",
+        "order",
+    )
+
+    # Tournament FK can get big, so this prevents a giant dropdown
+    autocomplete_fields = (
+        "tournament",
+    )
+
+    # These should not be edited directly in admin
+    readonly_fields = (
+        "status",
+        "created_at",
+        "updated_at",
+    )
+
+    # Inline: show all Series (matches) that belong to this Stage
     inlines = [SeriesInline]
+
     fieldsets = (
-        (None, {"fields": ("tournament", "stage_type", "variant", "slug", "order", "tier")}),
-        ("Schedule", {"fields": ("start_date", "end_date")}),
-        ("Timestamps", {"classes": ("collapse",), "fields": ("status", "created_at", "updated_at")}),
+        (None, {
+            "fields": (
+                "tournament",
+                "stage_type",
+                "variant",
+                "slug",
+                "order",
+                "tier",
+            )
+        }),
+        ("Schedule", {
+            "fields": (
+                "start_date",
+                "end_date",
+            )
+        }),
+        ("Timestamps / System", {
+            "classes": ("collapse",),
+            "fields": (
+                "status",
+                "created_at",
+                "updated_at",
+            )
+        }),
     )
 
     def get_queryset(self, request):
+        """
+        Optimize: We always show tournament in list_display,
+        so select_related reduces queries.
+        """
         qs = super().get_queryset(request)
         return qs.select_related("tournament")
+
+    @admin.display(description="Stage")
+    def stage_label(self, obj: Stage):
+        """
+        Human-friendly stage label for list_display.
+        Examples:
+        - "Group Stage"
+        - "Playoffs Stage - Upper Bracket"
+        - "Grand Finals"
+        """
+        # If stage_type is using STAGE_TYPES choices, we can get its label using .get_FOO_display()
+        if hasattr(obj, "get_stage_type_display"):
+            base_label = obj.get_stage_type_display()
+        else:
+            # fallback if not a choices field
+            base_label = obj.stage_type
+
+        if obj.variant:
+            return f"{base_label} - {obj.variant}"
+        return base_label
 
 
 # ----- Series: limit Stage/Teams to the selected Tournament -----

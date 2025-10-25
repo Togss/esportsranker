@@ -124,19 +124,29 @@ class StaffMembership(TimeStampedModel):
         )
 
     def clean(self):
+        # 0. If parent staff isn't saved yet, we can't meaningfully check overlaps.
+        # This happens in admin when creating a new Staff + inline memberships together.
+        if not self.staff_id:
+            return
+
         # 1. Can't end before start.
         if self.end_date and self.end_date < self.start_date:
             raise ValidationError('End date cannot be earlier than start date.')
 
-        # 2. Prevent overlapping contracts for same staff across teams.
+        # 2. Prevent overlapping contracts for the SAME STAFF across teams.
         overlapping = (
             StaffMembership.objects
             .filter(staff=self.staff)
             .exclude(pk=self.pk)
         )
+
         for m in overlapping:
-            a_start, a_end = self.start_date, self.end_date or date.max
-            b_start, b_end = m.start_date, m.end_date or date.max
+            a_start = self.start_date
+            a_end = self.end_date or date.max
+            b_start = m.start_date
+            b_end = m.end_date or date.max
+
+            # ranges [a_start, a_end] and [b_start, b_end] overlap?
             if a_start <= b_end and b_start <= a_end:
                 raise ValidationError(
                     'This staff member already has an active contract in that time range.'

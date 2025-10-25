@@ -5,16 +5,183 @@ import django.db.models as dj_models
 from django.utils import timezone
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.apps import apps
 from apps.common.models import TimeStampedModel, SluggedModel
 from apps.teams.models import Team
 from apps.heroes.models import Hero
 from decimal import Decimal, ROUND_HALF_UP
 from apps.common.slug_helper import ensure_unique_slug, build_stage_slug_base
 
+def tournament_logo_upload_to(instance, filename: str) -> str:
+    """
+    Store all tournament logos under tournament/logos/,
+    file named using the tournament slug, e.g. mpl-ph-s13.png
+    """
+    # guard against weird filenames with no extension
+    parts = filename.rsplit(".", 1)
+    ext = parts[1].lower() if len(parts) == 2 else "png"
+    return f"tournament/logos/{instance.slug}.{ext}"
+
+
+class Tournament(SluggedModel, TimeStampedModel):
+    """
+    Core tournament entity (M-Series, MPL PH S13, MSC 2024, etc.)
+
+    Notes:
+    - status is auto-derived from start_date/end_date on save()
+    - tier maps to event weight (S/A/B/C/D) used by ranking engine
+    - region follows Team.region choices for consistency
+    """
+
+    # S/A/B/C/D == Event Tier, used for weight multipliers in ranking calc
+    TIER_CHOICES = [
+        ('S', 'S-tier'),
+        ('A', 'A-tier'),
+        ('B', 'B-tier'),
+        ('C', 'C-tier'),
+        ('D', 'D-tier'),
+    ]
+
+    STATUS_UPCOMING = "UPCOMING"
+    STATUS_ONGOING = "ONGOING"
+    STATUS_COMPLETED = "COMPLETED"
+
+    STATUS_CHOICES = [
+        (STATUS_UPCOMING, "Upcoming"),
+        (STATUS_ONGOING, "Ongoing"),
+        (STATUS_COMPLETED, "Completed"),
+    ]
+
+    # Reuse region choices from Team to stay consistent
+    region = models.CharField(
+        max_length=8,
+        choices=Team._meta.get_field("region").choices,
+        db_index=True,
+        help_text="Primary region or league this tournament belongs to (e.g. PH, ID, INTL).",
+    )
+
+    tier = models.CharField(
+        max_length=1,
+        choices=TIER_CHOICES,
+        db_index=True,
+        help_text="S-tier (world), A-tier (continental), B-tier (franchise league), etc.",
+    )
+
+    start_date = models.DateField(db_index=True)
+    end_date = models.DateField(db_index=True)
+
+    status = models.CharField(
+        max_length=16,
+        choices=STATUS_CHOICES,
+        db_index=True,
+    )
+
+    teams = models.ManyToManyField(
+        "teams.Team",
+        through="competitions.TournamentTeam",
+        related_name="tournaments",
+        blank=True,
+        help_text="Teams participating in this tournament.",
+    )
+
+    prize_pool = models.PositiveIntegerField(
+        blank=True,
+        null=True,
+        help_text="Prize pool in USD.",
+    )
+
+    logo = models.ImageField(
+        upload_to=tournament_logo_upload_to,
+        blank=True,
+        null=True,
+    )
+
+    description = models.TextField(
+        blank=True,
+        help_text="Public-facing description / summary for the tournament page.",
+    )
+
+    rules_link = models.URLField(
+        blank=True,
+        help_text="External link to official tournament rules / competitive rulebook.",
+    )
+
+    class Meta:
+        ordering = ["-start_date", "name"]
+        verbose_name = "Tournament"
+        verbose_name_plural = "Tournaments"
+
+        indexes = [
+            models.Index(fields=["region"]),
+            models.Index(fields=["tier"]),
+            models.Index(fields=["status"]),
+            models.Index(fields=["region", "status"]),
+            models.Index(fields=["tier", "status"]),
+        ]
+
+        constraints = [
+            # slug should never be empty string
+            models.CheckConstraint(
+                check=~Q(slug=""),
+                name="tournament_slug_not_empty",
+            ),
+
+            # same tournament name cannot start twice on the same date
+            models.UniqueConstraint(
+                fields=["name", "start_date"],
+                name="unique_tournament_name_start_date",
+                deferrable=models.Deferrable.DEFERRED,
+            ),
+
+            # end_date must be >= start_date
+            models.CheckConstraint(
+                check=Q(end_date__gte=F("start_date")),
+                name="end_date_after_start_date",
+            ),
+        ]
+
+    # --- helpers ---------------------------------------------------------
+
+    def compute_status(self) -> str:
+        """
+        Derive status from today's date relative to start/end.
+        This feeds Celery later so we can auto-refresh status daily.
+        """
+        today = timezone.localdate()
+
+        if self.start_date and self.end_date:
+            if today < self.start_date:
+                return self.STATUS_UPCOMING
+            elif self.start_date <= today <= self.end_date:
+                return self.STATUS_ONGOING
+            else:
+                return self.STATUS_COMPLETED
+
+        # fallback if somehow missing dates
+        return self.STATUS_UPCOMING
+
+    def save(self, *args, **kwargs):
+        # always sync status before saving to DB
+        self.status = self.compute_status()
+        super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return self.name
+    
+
 class TournamentTeam(models.Model):
+    """
+    Through model for Tournament <-> Team
+    Stores seed, qualification type, group, notes.
+    Used by:
+    - TournamentAdmin (TournamentTeamInline)
+    - Series.clean() validation ("is this team actually in this tournament?")
+    """
+
     INVITED = "INVITED"
     QUALIFIED = "QUALIFIED"
     FRANCHISE = "FRANCHISE"
+
     KIND_CHOICES = [
         (INVITED, "Invited"),
         (QUALIFIED, "Qualified"),
@@ -22,126 +189,66 @@ class TournamentTeam(models.Model):
     ]
 
     tournament = models.ForeignKey(
-        "competitions.Tournament",
+        Tournament,
         on_delete=models.CASCADE,
         related_name="tournament_teams"
     )
+
     team = models.ForeignKey(
-        "teams.Team",
+        Team,
         on_delete=models.CASCADE,
         related_name="tournament_entries"
     )
-    seed = models.PositiveSmallIntegerField(blank=True, null=True)
-    kind = models.CharField(max_length=12, choices=KIND_CHOICES, blank=True)
-    group = models.CharField(max_length=16, blank=True, help_text="e.g., Group A")
-    notes = models.CharField(max_length=255, blank=True)
+
+    seed = models.PositiveSmallIntegerField(
+        blank=True,
+        null=True,
+        help_text="Seed / placement coming into the event (1 = top seed).",
+    )
+
+    kind = models.CharField(
+        max_length=12,
+        choices=KIND_CHOICES,
+        blank=True,
+        help_text="How this team qualified (Invited / Qualified / Franchise).",
+    )
+
+    group = models.CharField(
+        max_length=16,
+        blank=True,
+        help_text="Group/Pool name, e.g. 'Group A'.",
+    )
+
+    notes = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Optional notes (sub roster, relegated, etc.).",
+    )
 
     class Meta:
         ordering = ["seed", "team__short_name"]
+        verbose_name = "Tournament Team"
+        verbose_name_plural = "Tournament Teams"
+        indexes = [
+            models.Index(fields=["tournament", "team"]),
+            models.Index(fields=["group"]),
+        ]
         constraints = [
             models.UniqueConstraint(
                 fields=["tournament", "team"],
-                name="unique_tournament_team"
+                name="unique_tournament_team",
+                deferrable=models.Deferrable.DEFERRED,
             ),
         ]
 
     def __str__(self):
-        return f"{self.team.short_name} ({self.tournament.name})"
-
-TIER_CHOICES = [
-    ('S', 'S-tier'),
-    ('A', 'A-tier'),
-    ('B', 'B-tier'),
-    ('C', 'C-tier'),
-    ('D', 'D-tier'),
-]
-
-STATUS_CHOICES = [
-    ('UPCOMING', 'Upcoming'),
-    ('ONGOING', 'Ongoing'),
-    ('COMPLETED', 'Completed'),
-]
-
-def tournament_logo_upload_to(instance, filename: str) -> str:
-    ext = f'.{filename.rsplit(".", 1)[-1].lower()}' if '.' in filename else ''
-    return f'tournament/logos/{instance.slug}{ext}'
-
-class Tournament(SluggedModel, TimeStampedModel):
-    region = models.CharField(
-        max_length=5,
-        choices=Team._meta.get_field('region').choices, db_index=True
-    )
-    tier = models.CharField(
-        max_length=2,
-        choices=TIER_CHOICES,
-        db_index=True
-    )
-    start_date = models.DateField(db_index=True)
-    end_date = models.DateField(db_index=True)
-    status = models.CharField(
-        max_length=10,
-        choices=STATUS_CHOICES,
-        db_index=True
-    )
-    teams = models.ManyToManyField(
-        'teams.Team',
-        through='competitions.TournamentTeam',
-        related_name='tournaments',
-        blank=True,
-        help_text="Teams participating in the tournament"
-    )
-    prize_pool = models.PositiveIntegerField(
-        blank=True, null=True,
-        help_text="Prize pool in USD"
-    )
-    logo = models.ImageField(upload_to=tournament_logo_upload_to, blank=True, null=True)
-    description = models.TextField(blank=True)
-    tournament_rules_link = models.URLField(blank=True, help_text="Link to the tournament rules")
-
-    class Meta:
-        ordering = ['-start_date', 'name']
-        verbose_name = 'Tournament'
-        verbose_name_plural = 'Tournaments'
-        indexes = [
-            models.Index(fields=['region']),
-            models.Index(fields=['tier']),
-            models.Index(fields=['status']),
-            models.Index(fields=['region', 'status']),
-            models.Index(fields=['tier', 'status']),
-        ]
-        constraints = [
-            models.CheckConstraint(check=~Q(slug=''), name='tournament_slug_not_empty'),
-            models.UniqueConstraint(
-                fields=['name', 'start_date'],
-                name='unique_tournament_name_start_date',
-                deferrable=models.Deferrable.DEFERRED
-            ),
-            models.CheckConstraint(
-                check=Q(end_date__gte=F('start_date')),
-                name='end_date_after_start_date'
-            ),
-
-        ]
-
-    def compute_status(self):
-        today = timezone.localdate()
-        if self.start_date and self.end_date:
-            if today < self.start_date:
-                return 'UPCOMING'
-            elif self.start_date <= today <= self.end_date:
-                return 'ONGOING'
-            else:
-                return 'COMPLETED'
-        return 'UPCOMING'
+        team_name = getattr(self.team, "short_name", str(self.team))
+        return f"{team_name} ({self.tournament.name})"
     
-    def save(self, *args, **kwargs):
-        self.status = self.compute_status()
-        return super().save(*args, **kwargs)
-
-    def __str__(self):
-        return self.name
-
-
+# ----------------------------------------------------
+# Stage model
+# ----------------------------------------------------
+# Choices
 STAGE_TYPES = [
     ('WILD CARD', 'Wild Card Stage'),
     ('GROUPS', 'Group Stage'),
@@ -158,16 +265,80 @@ TIER_STAGE_CHOICES = [
     ('4', 'Tier 4'),
     ('5', 'Tier 5'),
 ]
+
+# STATUS_CHOICES should match Tournament.STATUS_CHOICES
+STATUS_CHOICES = [
+    ('UPCOMING', 'Upcoming'),
+    ('ONGOING', 'Ongoing'),
+    ('COMPLETED', 'Completed'),
+]
+
+
 class Stage(TimeStampedModel):
-    tournament = models.ForeignKey(Tournament, on_delete=models.CASCADE, related_name='stages')
-    stage_type = models.CharField(max_length=20, choices=STAGE_TYPES, db_index=True)
-    slug = models.SlugField(max_length=50, blank=True, unique=True)
-    variant = models.CharField(max_length=50, blank=True, help_text="Variant of the stage, e.g., 'Double Elimination'")
-    order = models.PositiveIntegerField(help_text="Order of the stage in the tournament")
-    start_date = models.DateField(db_index=True)
-    end_date = models.DateField(db_index=True)
-    tier = models.CharField(max_length=2, choices=TIER_STAGE_CHOICES, db_index=True)
-    status = models.CharField(max_length=10, choices=STATUS_CHOICES, db_index=True)
+    """
+    A subdivision of a Tournament.
+    Examples:
+    - "Group Stage"
+    - "Playoffs - Upper Bracket"
+    - "Grand Finals"
+
+    'order' defines progression (1 = first stage, 2 = next, etc.).
+    'tier' lets us weigh importance later (Tier 1 = highest stakes).
+    """
+
+    tournament = models.ForeignKey(
+        Tournament,
+        on_delete=models.CASCADE,
+        related_name='stages',
+        db_index=True,
+    )
+
+    stage_type = models.CharField(
+        max_length=20,
+        choices=STAGE_TYPES,
+        db_index=True,
+    )
+
+    slug = models.SlugField(
+        max_length=50,
+        blank=True,
+        unique=True,
+        help_text="Auto-generated identifier for URLs / linking.",
+    )
+
+    variant = models.CharField(
+        max_length=50,
+        blank=True,
+        help_text="Variant of the stage, e.g. 'Upper Bracket', 'Double Elimination'.",
+    )
+
+    order = models.PositiveIntegerField(
+        help_text="Order of the stage in the tournament (1 = earliest).",
+    )
+
+    start_date = models.DateField(
+        db_index=True,
+        help_text="When this stage starts.",
+    )
+
+    end_date = models.DateField(
+        db_index=True,
+        help_text="When this stage ends.",
+    )
+
+    tier = models.CharField(
+        max_length=2,
+        choices=TIER_STAGE_CHOICES,
+        db_index=True,
+        help_text="Tier weight for ranking calc (1 = highest).",
+    )
+
+    status = models.CharField(
+        max_length=10,
+        choices=STATUS_CHOICES,
+        db_index=True,
+        help_text="Auto-computed (Upcoming / Ongoing / Completed).",
+    )
 
     class Meta:
         ordering = ['tournament', 'order']
@@ -179,44 +350,76 @@ class Stage(TimeStampedModel):
             models.Index(fields=['end_date']),
         ]
         constraints = [
+            # Same stage_type+variant cannot appear twice in the same tournament
             models.UniqueConstraint(
                 fields=['tournament', 'stage_type', 'variant'],
                 name='unique_stage_type_variant_per_tournament',
-                deferrable=models.Deferrable.DEFERRED
+                deferrable=models.Deferrable.DEFERRED,
             ),
+
+            # end_date must be >= start_date
             models.CheckConstraint(
                 check=Q(end_date__gte=F('start_date')),
-                name='stage_end_date_after_start_date'
+                name='stage_end_date_after_start_date',
             ),
+
+            # Stage order must be unique per tournament (no two stages are both "order=2")
             models.UniqueConstraint(
                 fields=['tournament', 'order'],
                 name='unique_stage_order_per_tournament',
-                deferrable=models.Deferrable.DEFERRED
+                deferrable=models.Deferrable.DEFERRED,
             ),
+
             models.CheckConstraint(
                 check=Q(order__gte=1),
-                name='stage_order_gte_1'
+                name='stage_order_gte_1',
             ),
         ]
 
     def __str__(self):
-        type_label = dict(STAGE_TYPES).get(self.stage_type, self.stage_type.title())
-        return f'{type_label}{f" - {self.variant}" if self.variant else ""} ({self.tournament.name})'
+        # human-readable type label
+        stage_type_label = dict(STAGE_TYPES).get(
+            self.stage_type,
+            self.stage_type.title()
+        )
+        # include variant if provided
+        if self.variant:
+            label = f"{stage_type_label} - {self.variant}"
+        else:
+            label = stage_type_label
+        return f"{label} ({self.tournament.name})"
 
+    # -----------------
+    # Validation
+    # -----------------
     def clean(self):
         super().clean()
 
+        # must belong to a tournament
         if not self.tournament_id:
             raise ValidationError("Tournament must be set for the stage.")
-        
+
+        # must have valid range
         if self.start_date and self.end_date and self.end_date < self.start_date:
             raise ValidationError("End date must be after or equal to start date.")
+
+        # must fit within the tournament window
         t = self.tournament
-        if (t.start_date and self.start_date and self.start_date < t.start_date) or \
-           (t.end_date and self.end_date and self.end_date > t.end_date):
+        if (
+            t.start_date and self.start_date and self.start_date < t.start_date
+        ) or (
+            t.end_date and self.end_date and self.end_date > t.end_date
+        ):
             raise ValidationError("Stage dates must be within the tournament dates.")
-        
+
+    # -----------------
+    # Status helper
+    # -----------------
     def compute_status(self):
+        """
+        Derive UPCOMING / ONGOING / COMPLETED from dates.
+        Matches Tournament.compute_status().
+        """
         today = timezone.localdate()
         if self.start_date and self.end_date:
             if today < self.start_date:
@@ -226,100 +429,223 @@ class Stage(TimeStampedModel):
             else:
                 return 'COMPLETED'
         return 'UPCOMING'
-    
+
+    # -----------------
+    # Save override
+    # -----------------
     def save(self, *args, **kwargs):
+        # build slug if missing
         if not self.slug:
-            base = build_stage_slug_base(self)
-            candidate = base
+            # assumes build_stage_slug_base(self) returns a base string
+            base_candidate = build_stage_slug_base(self)
         else:
-            candidate = self.slug
-        self.slug = ensure_unique_slug(candidate, self.__class__, instance_pk=self.pk)
+            base_candidate = self.slug
+
+        # ensure slug is unique, even if similar stages exist
+        self.slug = ensure_unique_slug(
+            base_candidate,
+            self.__class__,
+            instance_pk=self.pk,
+        )
+
+        # always compute status before saving
         self.status = self.compute_status()
+
+        # run clean() validations every save
         self.full_clean()
+
         super().save(*args, **kwargs)
 
 
+# Series model
+# ----------------------------------------------------
+# Stores head-to-head matchups between two teams within a stage
+# ----------------------------------------------------
 class Series(TimeStampedModel):
-    tournament = models.ForeignKey(Tournament, related_name='series', on_delete=models.CASCADE)
-    stage = models.ForeignKey(Stage, related_name='series', on_delete=models.CASCADE)
-    team1 = models.ForeignKey(Team, related_name='series_as_team1', on_delete=models.CASCADE)
-    team2 = models.ForeignKey(Team, related_name='series_as_team2', on_delete=models.CASCADE)
-    winner = models.ForeignKey(Team, related_name='series_won', on_delete=models.SET_NULL, null=True, blank=True)
-    best_of = models.PositiveIntegerField(choices=[(1, 'Bo1'), (3, 'Bo3'), (5, 'Bo5'), (7, 'Bo7')], default=3)
-    scheduled_date = models.DateTimeField(db_index=True)
-    score = models.CharField(max_length=20, blank=True, help_text="Score in format 'Team1Score-Team2Score', e.g., '2-1'")
+    """
+    A single head-to-head matchup between two teams
+    within a specific Stage of a Tournament.
+    Example: 'ONIC vs AP BREN - Upper Bracket Final'
+    """
+
+    tournament = models.ForeignKey(
+        Tournament,
+        related_name="series",
+        on_delete=models.CASCADE,
+        db_index=True,
+    )
+
+    stage = models.ForeignKey(
+        Stage,
+        related_name="series",
+        on_delete=models.CASCADE,
+        db_index=True,
+    )
+
+    team1 = models.ForeignKey(
+        Team,
+        related_name="series_as_team1",
+        on_delete=models.CASCADE,
+        db_index=True,
+    )
+
+    team2 = models.ForeignKey(
+        Team,
+        related_name="series_as_team2",
+        on_delete=models.CASCADE,
+        db_index=True,
+    )
+
+    winner = models.ForeignKey(
+        Team,
+        related_name="series_won",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Auto-filled based on score calculation.",
+    )
+
+    best_of = models.PositiveIntegerField(
+        choices=[(1, "Bo1"), (3, "Bo3"), (5, "Bo5"), (7, "Bo7")],
+        default=3,
+        null=True,
+        blank=True,
+        help_text="Length of the series (Bo3, Bo5...).",
+    )
+
+    scheduled_date = models.DateTimeField(
+        db_index=True,
+        help_text="Planned start (local time). Used for overdue data reminders.",
+    )
+
+    score = models.CharField(
+        max_length=20,
+        blank=True,
+        help_text="Score in format 'Team1Score-Team2Score', e.g. '2-1'.",
+    )
 
     class Meta:
-        ordering = ['-scheduled_date']
-        verbose_name = 'Series'
-        verbose_name_plural = 'Series'
+        ordering = ["-scheduled_date"]
+        verbose_name = "Series"
+        verbose_name_plural = "Series"
         indexes = [
-            models.Index(fields=['tournament']),
-            models.Index(fields=['stage']),
-            models.Index(fields=['team1']),
-            models.Index(fields=['team2']),
-            models.Index(fields=['winner']),
-            models.Index(fields=['scheduled_date']),
+            models.Index(fields=["tournament"]),
+            models.Index(fields=["stage"]),
+            models.Index(fields=["team1"]),
+            models.Index(fields=["team2"]),
+            models.Index(fields=["winner"]),
+            models.Index(fields=["scheduled_date"]),
         ]
         constraints = [
+            # prevent duplicate team1 vs team2 within the same stage
             models.UniqueConstraint(
-                fields=['stage', 'team1', 'team2'],
-                name='unique_series_per_stage_teams',
-                deferrable=models.Deferrable.DEFERRED
+                fields=["tournament", "stage", "team1", "team2", "scheduled_date"],
+                name="unique_matchup_per_stage",
+                deferrable=models.Deferrable.DEFERRED,
             ),
+            # don't allow same team twice
             models.CheckConstraint(
-                check=~Q(team1=F('team2')),
-                name='teams_must_be_different_in_series'
+                check=~Q(team1=F("team2")),
+                name="teams_must_be_different_in_series",
             ),
         ]
 
     def __str__(self):
-        return f"{self.team1.short_name} vs {self.team2.short_name} - {self.stage}"
+        return f"{self.team1.short_name} vs {self.team2.short_name} – ({self.stage})"
 
+    # -------------------------
+    # helpers
+    # -------------------------
     def compute_score_and_winner(self, persist: bool = True):
-        from .services import compute_series_score_and_winner
-        score_str, winner = compute_series_score_and_winner(self)
-        winner_id = winner.id if winner else None
+        """
+        Use services to compute:
+        - final score string (e.g. '3-1')
+        - winning team id
+
+        If persist=True and obj already has pk, write the updates to DB
+        AND update this instance in memory.
+
+        Returns:
+            (score_str, winner_team_obj_or_None)
+        """
+        from .services import compute_series_score_and_winner  # local import to avoid circulars
+        score_str, winner_id = compute_series_score_and_winner(self)
+
+        winner_obj = None
+        if winner_id:
+            try:
+                winner_obj = Team.objects.get(pk=winner_id)
+            except Team.DoesNotExist:
+                winner_obj = None
 
         if persist and self.pk:
+            # only hit DB if something changed
             if self.score != score_str or self.winner_id != winner_id:
                 type(self).objects.filter(pk=self.pk).update(
                     score=score_str,
                     winner_id=winner_id,
                 )
-                self.score = score_str
-                self.winner_id = winner_id
-        return score_str, winner
+            self.score = score_str
+            self.winner_id = winner_id
+
+        return score_str, winner_obj
 
     def clean(self):
+        """
+        Enforce data sanity before saving:
+        - tournament is required
+        - stage is required and must belong to the same tournament
+        - team1 != team2
+        - both teams must be registered in this tournament via TournamentTeam
+        """
         errors = {}
+
+        # tournament must exist
         if not self.tournament_id:
-            errors['tournament'] = "Tournament must be set for the series."
+            errors["tournament"] = "Tournament must be set for the series."
+
+        # stage must exist and match tournament
         if not self.stage_id:
-            errors['stage'] = "Stage must be set for the series."
-        elif self.stage.tournament_id and self.stage.tournament_id != self.tournament_id:
-            errors['stage'] = "Stage must belong to the same tournament as the series."
+            errors["stage"] = "Stage must be set for the series."
+        elif (
+            self.stage.tournament_id
+            and self.tournament_id
+            and self.stage.tournament_id != self.tournament_id
+        ):
+            errors["stage"] = "Stage must belong to the same tournament as the series."
 
+        # teams must be different
         if self.team1_id and self.team2_id and self.team1_id == self.team2_id:
-            errors['team2'] = "Team 2 must be different from Team 1."
+            errors["team2"] = "Team 2 must be different from Team 1."
 
+        # get TournamentTeam model safely without importing from self
+        TournamentTeam = apps.get_model('competitions', 'TournamentTeam')
+
+        # team1 must be registered in this tournament
         if self.tournament_id and self.team1_id:
             if not TournamentTeam.objects.filter(
                 tournament_id=self.tournament_id,
-                team_id=self.team1_id
+                team_id=self.team1_id,
             ).exists():
-                errors['team1'] = "Team 1 is not registered in this tournament."
+                errors["team1"] = "Team 1 is not registered in this tournament."
 
+        # team2 must be registered in this tournament
         if self.tournament_id and self.team2_id:
             if not TournamentTeam.objects.filter(
                 tournament_id=self.tournament_id,
-                team_id=self.team2_id
+                team_id=self.team2_id,
             ).exists():
-                errors['team2'] = "Team 2 is not registered in this tournament."
+                errors["team2"] = "Team 2 is not registered in this tournament."
 
         if errors:
             raise ValidationError(errors)
+
         super().clean()
+
+    def save(self, *args, **kwargs):
+        self.compute_score_and_winner(persist=True)
+        super().save(*args, **kwargs)
 
 # Game model
 # ----------------------------------------------------

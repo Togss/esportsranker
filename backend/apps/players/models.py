@@ -17,10 +17,7 @@ def player_photo_upload_to(instance, filename: str) -> str:
     ext = f'.{filename.rsplit(".", 1)[-1].lower()}' if "." in filename else ""
     return f'player/photos/{instance.slug}{ext}'
 
-IGN_VALIDATOR = RegexValidator(
-    regex=r"^[A-Za-z0-9_.\-]{2,24}$",
-    message="In-Game Name must be 2-24 characters long and can include letters, numbers, underscores, hyphens, and periods."
-)
+
 NATIONALITY_VALIDATOR = RegexValidator(
     regex=r"^[A-Z]{2}$",
     message="Nationality must be a valid ISO 3166-1 alpha-2 country code (2 uppercase letters)."
@@ -30,7 +27,6 @@ class Player(TimeStampedModel, SluggedModel ):
     ign = models.CharField(
         max_length=24,
         unique=True,
-        validators=[IGN_VALIDATOR],
         help_text="Player's in-game name (2-24 characters: letters, numbers, underscores, hyphens, periods)"
     )
     photo = models.ImageField(upload_to=player_photo_upload_to, blank=True, null=True)
