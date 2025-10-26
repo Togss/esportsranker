@@ -5,35 +5,25 @@ from django.core.validators import RegexValidator
 from django.core.exceptions import ValidationError
 
 from apps.common.models import TimeStampedModel, SluggedModel
+from apps.common.enums import StaffRole
+from apps.common.validators import (
+        NATIONALITY_VALIDATOR,
+        validate_start_before_end,
+        validate_membership_overlap,
+)
 from apps.teams.models import Team
 
-STAFF_ROLE_CHOICES = [
-    ('HEAD_COACH', 'Head Coach'),
-    ('ASST_COACH', 'Assistant Coach'),
-    ('ANALYST', 'Analyst'),
-    ('MANAGER', 'Team Manager'),
-]
 
 def staff_photo_upload_to(instance, filename: str) -> str:
     ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
     return f"staff/photos/{instance.slug}.{ext}" if ext else f"staff/photos/{instance.slug}"
-
-HANDLE_VALIDATOR = RegexValidator(
-    regex=r'^[A-Za-z0-9_\-.]{2,24}$',
-    message='Handle must be 2–24 characters and can include letters, numbers, underscores, hyphens, and periods.',
-)
-
-NATIONALITY_VALIDATOR = RegexValidator(
-    regex=r'^[A-Z]{2}$',
-    message='Nationality must be ISO 3166-1 alpha-2 (e.g., PH, ID, JP).',
-)
 
 class Staff(TimeStampedModel, SluggedModel):
     # SluggedModel gives: name (real / display), slug
     handle = models.CharField(
         max_length=24,
         unique=True,
-        validators=[HANDLE_VALIDATOR],
+        db_index=True,
         help_text="Public alias / coach tag (e.g. BONCHAN, MASTERCOACH).",
     )
 
@@ -41,7 +31,7 @@ class Staff(TimeStampedModel, SluggedModel):
 
     primary_role = models.CharField(
         max_length=20,
-        choices=STAFF_ROLE_CHOICES,
+        choices=StaffRole.choices,
         db_index=True,
         help_text="Main role overall (head coach, analyst, etc.)",
     )
@@ -49,6 +39,7 @@ class Staff(TimeStampedModel, SluggedModel):
     nationality = models.CharField(
         max_length=2,
         blank=True,
+        db_index=True,
         help_text="ISO 3166-1 alpha-2 code (e.g. PH)",
     )
 
@@ -101,7 +92,7 @@ class StaffMembership(TimeStampedModel):
     )
     role_at_team = models.CharField(
         max_length=20,
-        choices=STAFF_ROLE_CHOICES,
+        choices=StaffRole.choices,
         db_index=True,
         help_text="Role held on this specific team during this period.",
     )
@@ -124,33 +115,22 @@ class StaffMembership(TimeStampedModel):
         )
 
     def clean(self):
-        # 0. If parent staff isn't saved yet, we can't meaningfully check overlaps.
-        # This happens in admin when creating a new Staff + inline memberships together.
-        if not self.staff_id:
-            return
-
-        # 1. Can't end before start.
-        if self.end_date and self.end_date < self.start_date:
-            raise ValidationError('End date cannot be earlier than start date.')
-
-        # 2. Prevent overlapping contracts for the SAME STAFF across teams.
-        overlapping = (
-            StaffMembership.objects
-            .filter(staff=self.staff)
-            .exclude(pk=self.pk)
+        validate_start_before_end(
+            self.start_date,
+            self.end_date,
+            field_start='start_date',
+            field_end='end_date'
         )
 
-        for m in overlapping:
-            a_start = self.start_date
-            a_end = self.end_date or date.max
-            b_start = m.start_date
-            b_end = m.end_date or date.max
-
-            # ranges [a_start, a_end] and [b_start, b_end] overlap?
-            if a_start <= b_end and b_start <= a_end:
-                raise ValidationError(
-                    'This staff member already has an active contract in that time range.'
-                )
+        validate_membership_overlap(
+            subject=self.staff,
+            start_date=self.start_date,
+            end_date=self.end_date,
+            current_pk=self.pk,
+            queryset=StaffMembership.objects,
+            subject_field_name='staff',
+            overlap_error_message='This staff member already has an active contract in that time range.'
+        )
 
     def __str__(self):
         end_display = self.end_date or 'present'

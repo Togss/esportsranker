@@ -682,7 +682,7 @@ def _readonly_fields_for(model):
 
 @admin.register(TeamGameStat)
 class TeamGameStatReadonlyAdmin(admin.ModelAdmin):
-    list_display = ('game', 'team', 'side', 'game_result', 'gold', 'score',
+    list_display = ('game', 'team', 'side', 'game_result', 'gold', 't_score',
                     'tower_destroyed', 'lord_kills', 'turtle_kills',
                     'orange_buff', 'purple_buff')
     list_filter = ('side', 'game_result', 'game__series__tournament', 'game__series')

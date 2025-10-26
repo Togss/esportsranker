@@ -2,44 +2,52 @@ from django.db import models
 from django.core.validators import MinValueValidator, MaxValueValidator, MinLengthValidator, RegexValidator
 from django.core.exceptions import ValidationError
 from datetime import date
+
+from apps.common.enums import PlayerRole
+from apps.common.validators import (
+    NATIONALITY_VALIDATOR,
+    validate_start_before_end,
+    validate_membership_overlap
+)
 from apps.common.models import TimeStampedModel, SluggedModel
 from apps.teams.models import Team
 
-ROLE_CHOICES = [
-    ('GOLD', 'Gold Lane'),
-    ('MID', 'Mid Lane'),
-    ('JUNGLE', 'Jungle'),
-    ('EXP', 'Exp Lane'),
-    ('ROAM', 'Roam'),
-]
 
 def player_photo_upload_to(instance, filename: str) -> str:
     ext = f'.{filename.rsplit(".", 1)[-1].lower()}' if "." in filename else ""
     return f'player/photos/{instance.slug}{ext}'
 
-
-NATIONALITY_VALIDATOR = RegexValidator(
-    regex=r"^[A-Z]{2}$",
-    message="Nationality must be a valid ISO 3166-1 alpha-2 country code (2 uppercase letters)."
-)
-
+#--------------------------------------------------------------------
+# Player Model and PlayerMembership Model
+#--------------------------------------------------------------------
 class Player(TimeStampedModel, SluggedModel ):
     ign = models.CharField(
-        max_length=24,
+        max_length=30,
         unique=True,
-        help_text="Player's in-game name (2-24 characters: letters, numbers, underscores, hyphens, periods)"
+        help_text="In-Game Name (IGN) of the player",
+        db_index=True
     )
     photo = models.ImageField(upload_to=player_photo_upload_to, blank=True, null=True)
-    role = models.CharField(max_length=10, choices=ROLE_CHOICES, db_index=True)
+
+    role = models.CharField(
+        max_length=10,
+        choices=PlayerRole.choices,
+        db_index=True
+    )
+
     date_of_birth = models.DateField(blank=True, null=True)
+
     nationality = models.CharField(
         max_length=2, blank=True,
         help_text="ISO 3166-1 alpha-2 country code"
     )
+
     is_active = models.BooleanField(
-        default=True, db_index=True,
+        default=True,
+        db_index=True,
         help_text="Indicates if the player is currently active"
     )
+
     achievements = models.TextField(blank=True)
 
     x = models.URLField(blank=True, help_text="Link to player's X (formerly Twitter) profile")
@@ -88,12 +96,19 @@ class PlayerMembership(TimeStampedModel):
         Team, on_delete=models.CASCADE,
         related_name='memberships'
     )
-    role_at_team = models.CharField(max_length=10, choices=ROLE_CHOICES, db_index=True)
+    role_at_team = models.CharField(
+        max_length=10,
+        choices=PlayerRole.choices,
+        db_index=True,
+        help_text="Player's primary role while at the team"
+    )
+
     start_date = models.DateField()
     end_date = models.DateField(
         blank=True, null=True,
         help_text="Leave blank if currently active with the team"
     )
+
     is_starter = models.BooleanField(
         default=False,
         help_text="Indicates if the player was a starter during this membership"
@@ -108,18 +123,22 @@ class PlayerMembership(TimeStampedModel):
         unique_together = ('player', 'team', 'start_date')
 
     def clean(self):
-        if self.end_date and self.end_date < self.start_date:
-            raise ValidationError("End date cannot be earlier than start date.")
-        
-        overlapping = PlayerMembership.objects.filter(
-            player=self.player,
-        ).exclude(pk=self.pk)
-        for m in overlapping:
-            a_start, a_end = self.start_date, self.end_date or date.max
-            b_start, b_end = m.start_date, m.end_date or date.max
-            if a_start <= b_end and b_start <= a_end:
-                raise ValidationError("This membership period overlaps with another membership for the same player.")
-            
+        validate_start_before_end(
+            self.start_date,
+            self.end_date,
+            field_start='start_date',
+            field_end='end_date'
+        )
+        validate_membership_overlap(
+            subject=self.player,
+            start_date=self.start_date,
+            end_date=self.end_date,
+            current_pk=self.pk,
+            queryset=PlayerMembership.objects,
+            subject_field_name='player',
+            overlap_error_message='This player has overlapping team memberships.'
+        )
+
     def __str__(self):
         end_display = self.end_date or 'present'
         return f"{self.player.ign} - {self.team.short_name} ({self.start_date} to {end_display})"

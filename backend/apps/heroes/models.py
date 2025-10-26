@@ -3,15 +3,8 @@ from django.core.exceptions import ValidationError
 from django.db.models import UniqueConstraint
 from django.db.models.functions import Lower
 from apps.common.models import TimeStampedModel, SluggedModel
+from apps.common.enums import HeroClass
 
-CLASS_CHOICES = [
-    ('TANK', 'Tank'),
-    ('FIGHTER', 'Fighter'),
-    ('ASSASSIN', 'Assassin'),
-    ('MAGE', 'Mage'),
-    ('MARKSMAN', 'Marksman'),
-    ('SUPPORT', 'Support'),
-]
 
 def hero_icon_upload_to(instance, filename: str) -> str:
     ext = f'.{filename.rsplit(".", 1)[-1].lower()}' if "." in filename else ""
@@ -19,11 +12,11 @@ def hero_icon_upload_to(instance, filename: str) -> str:
 
 class Hero(SluggedModel, TimeStampedModel):
     primary_class = models.CharField(
-        max_length=20, choices=CLASS_CHOICES,
+        max_length=20, choices=HeroClass.choices,
         db_index=True
     )
     secondary_class = models.CharField(
-        max_length=20, choices=CLASS_CHOICES,
+        max_length=20, choices=HeroClass.choices,
         blank=True, null=True,
         db_index=True
     )
@@ -56,7 +49,7 @@ class Hero(SluggedModel, TimeStampedModel):
     
     @property
     def classes(self) -> list[str]:
-        labels = dict(CLASS_CHOICES)
+        labels = dict(HeroClass.choices)
         out = [labels.get(self.primary_class)]
         if self.secondary_class:
             out.append(labels.get(self.secondary_class))
