@@ -1,37 +1,60 @@
 from rest_framework import serializers
-from .models import Player
+from .models import Player, PlayerMembership
+
+
+class PlayerMembershipSerializer(serializers.ModelSerializer):
+    team_name = serializers.CharField(source="team.short_name", read_only=True)
+
+    class Meta:
+        model = PlayerMembership
+        fields = [
+            "team_name",
+            "role_at_team",
+            "start_date",
+            "end_date",
+            "is_starter",
+            "is_active_today",
+        ]
+
 
 class PlayerSerializer(serializers.ModelSerializer):
-    photo_url = serializers.SerializerMethodField()
-    current_team = serializers.SerializerMethodField()
+    nationality = serializers.SerializerMethodField()
+    age = serializers.IntegerField(read_only=True)
+    photo = serializers.SerializerMethodField()
+    memberships = PlayerMembershipSerializer(many=True, read_only=True)
 
     class Meta:
         model = Player
         fields = [
-            "id", "ign", "name", "slug", "role", "nationality", "date_of_birth",
-            "photo_url", "achievements",
-            "x", "facebook", "youtube", "instagram", "is_active",
-            "current_team",  # computed, see get_current_team
-            "created_at", "updated_at",
+            "id",
+            "name",
+            "slug",
+            "ign",
+            "photo",
+            "role",
+            "age",
+            "date_of_birth",
+            "nationality",
+            "achievements",
+            "x",
+            "facebook",
+            "instagram",
+            "youtube",
+            "is_active",
+            "memberships",
+            "created_at",
+            "updated_at",
         ]
-        read_only_fields = fields
 
-    def get_photo_url(self, obj):
+    def get_photo(self, obj):
         request = self.context.get("request")
-        if obj.photo and hasattr(obj.photo, "url"):
-            return request.build_absolute_uri(obj.photo.url) if request else obj.photo.url
+        if obj.photo and request:
+            return request.build_absolute_uri(obj.photo.url)
+        elif obj.photo:
+            return obj.photo.url
         return None
 
-    def get_current_team(self, obj):
-        """
-        Uses annotations from the ViewSet if present, otherwise falls back to None.
-        """
-        tid = getattr(obj, "_current_team_id", None)
-        if not tid:
-            return None
-        return {
-            "id": tid,
-            "name": getattr(obj, "_current_team_name", None),
-            "short_name": getattr(obj, "_current_team_short_name", None),
-            "slug": getattr(obj, "_current_team_slug", None),
-        }
+    def get_nationality(self, obj):
+        if obj.nationality:
+            return obj.nationality.upper()
+        return None

@@ -1,22 +1,35 @@
 from rest_framework import serializers
 from .models import Team
 
+
 class TeamSerializer(serializers.ModelSerializer):
-    logo_url = serializers.SerializerMethodField()
+    region = serializers.CharField(source="get_region_display", read_only=True)
+    logo = serializers.SerializerMethodField()
 
     class Meta:
         model = Team
-        # name, slug, created_at, updated_at come from your common base
         fields = [
-            "id", "name", "short_name", "slug", "region",
-            "logo_url", "founded_year", "description", "achievements",
-            "website", "x", "facebook", "youtube",
-            "is_active", "created_at", "updated_at",
+            "id",
+            "name",
+            "slug",
+            "short_name",
+            "region",
+            "description",
+            "achievements",
+            "founded_year",
+            "website",
+            "x",
+            "facebook",
+            "youtube",
+            "logo",
+            "created_at",
+            "updated_at",
         ]
-        read_only_fields = fields  # read-only API for now
 
-    def get_logo_url(self, obj):
+    def get_logo(self, obj):
         request = self.context.get("request")
-        if obj.logo and hasattr(obj.logo, "url"):
-            return request.build_absolute_uri(obj.logo.url) if request else obj.logo.url
+        if obj.logo and request:
+            return request.build_absolute_uri(obj.logo.url)
+        elif obj.logo:
+            return obj.logo.url
         return None

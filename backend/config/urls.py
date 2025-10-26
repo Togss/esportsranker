@@ -7,13 +7,13 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 urlpatterns = [
     path('admin/', admin.site.urls),
 
-    #API (v1)
-    path('api/v1/', include('apps.teams.urls')),
-    path('api/v1/', include('apps.players.urls')),
-    path('api/v1/', include('apps.heroes.urls')),
-    path('api/v1/', include('apps.ingest.urls')),
+    # Public API (v1)
+    path('api/v1/', include('apps.api.urls')),  # All public endpoints centralized here
 
-    #API Schema and Docs
+    # Moderator/desktop ingestion API
+    path('ingest/', include('apps.ingest.urls')),
+
+    # API Schema and Docs
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
     path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
 ]
