@@ -1,0 +1,652 @@
+from django.db import models
+from django.db.models import Q, F, Sum
+from django.db.models.functions import Coalesce
+import django.db.models as dj_models
+from django.utils import timezone
+from django.core.exceptions import ValidationError
+from django.db import transaction
+from common.models import TimeStampedModel, SluggedModel
+from teams.models import Team
+from heroes.models import Hero
+from decimal import Decimal, ROUND_HALF_UP
+from common.slug_helper import ensure_unique_slug, build_stage_slug_base
+
+class TournamentTeam(models.Model):
+    INVITED = "INVITED"
+    QUALIFIED = "QUALIFIED"
+    FRANCHISE = "FRANCHISE"
+    KIND_CHOICES = [
+        (INVITED, "Invited"),
+        (QUALIFIED, "Qualified"),
+        (FRANCHISE, "Franchise"),
+    ]
+
+    tournament = models.ForeignKey(
+        "competitions.Tournament",
+        on_delete=models.CASCADE,
+        related_name="tournament_teams"
+    )
+    team = models.ForeignKey(
+        "teams.Team",
+        on_delete=models.CASCADE,
+        related_name="tournament_entries"
+    )
+    seed = models.PositiveSmallIntegerField(blank=True, null=True)
+    kind = models.CharField(max_length=12, choices=KIND_CHOICES, blank=True)
+    group = models.CharField(max_length=16, blank=True, help_text="e.g., Group A")
+    notes = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        ordering = ["seed", "team__short_name"]
+        constraints = [
+            models.UniqueConstraint(fields=["tournament", "team"], name="unique_tournament_team"),
+        ]
+
+    def __str__(self):
+        return f"{self.team.short_name} ({self.tournament.name})"
+
+TIER_CHOICES = [
+    ('S', 'S-tier'),
+    ('A', 'A-tier'),
+    ('B', 'B-tier'),
+    ('C', 'C-tier'),
+    ('D', 'D-tier'),
+]
+
+STATUS_CHOICES = [
+    ('UPCOMING', 'Upcoming'),
+    ('ONGOING', 'Ongoing'),
+    ('COMPLETED', 'Completed'),
+]
+
+def tournament_logo_upload_to(instance, filename: str) -> str:
+    ext = f'.{filename.rsplit(".", 1)[-1].lower()}' if '.' in filename else ''
+    return f'tournament/logos/{instance.slug}{ext}'
+
+class Tournament(SluggedModel, TimeStampedModel):
+    region = models.CharField(max_length=5, choices=Team._meta.get_field('region').choices)
+    tier = models.CharField(max_length=2, choices=TIER_CHOICES, db_index=True)
+    start_date = models.DateField(db_index=True)
+    end_date = models.DateField(db_index=True)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, db_index=True)
+    teams = models.ManyToManyField('teams.Team', through='competitions.TournamentTeam', related_name='tournaments', blank=True, help_text="Teams participating in the tournament")
+    prize_pool = models.PositiveIntegerField(blank=True, null=True, help_text="Prize pool in USD")
+    logo = models.ImageField(upload_to=tournament_logo_upload_to, blank=True, null=True)
+    description = models.TextField(blank=True)
+    tournament_rules_link = models.URLField(blank=True, help_text="Link to the tournament rules")
+
+    class Meta:
+        ordering = ['-start_date', 'name']
+        verbose_name = 'Tournament'
+        verbose_name_plural = 'Tournaments'
+        indexes = [
+            models.Index(fields=['region']),
+            models.Index(fields=['tier']),
+            models.Index(fields=['status']),
+            models.Index(fields=['start_date']),
+            models.Index(fields=['end_date']),
+            models.Index(fields=['region', 'status']),
+            models.Index(fields=['tier', 'status']),
+            models.Index(fields=['start_date', 'end_date']),
+        ]
+        constraints = [
+            models.CheckConstraint(check=~Q(slug=''), name='tournament_slug_not_empty'),
+            models.UniqueConstraint(
+                fields=['name', 'start_date'],
+                name='unique_tournament_name_start_date',
+                deferrable=models.Deferrable.DEFERRED
+            ),
+            models.CheckConstraint(
+                check=Q(end_date__gte=F('start_date')),
+                name='end_date_after_start_date'
+            ),
+
+        ]
+
+    def compute_status(self):
+        today = timezone.localdate()
+        if self.start_date and self.end_date:
+            if today < self.start_date:
+                return 'UPCOMING'
+            elif self.start_date <= today <= self.end_date:
+                return 'ONGOING'
+            else:
+                return 'COMPLETED'
+        return 'UPCOMING'
+    
+    def save(self, *args, **kwargs):
+        self.status = self.compute_status()
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.name
+
+
+STAGE_TYPES = [
+    ('WILD CARD', 'Wild Card Stage'),
+    ('GROUPS', 'Group Stage'),
+    ('REGULAR SEASON', 'Regular Season'),
+    ('KNOCKOUTS', 'Knockout Stage'),
+    ('PLAYOFFS', 'Playoffs Stage'),
+    ('FINALS', 'Grand Finals'),
+]
+
+TIER_STAGE_CHOICES = [
+    ('1', 'Tier 1'),
+    ('2', 'Tier 2'),
+    ('3', 'Tier 3'),
+    ('4', 'Tier 4'),
+    ('5', 'Tier 5'),
+]
+class Stage(TimeStampedModel):
+    tournament = models.ForeignKey(Tournament, on_delete=models.CASCADE, related_name='stages', db_index=True)
+    stage_type = models.CharField(max_length=20, choices=STAGE_TYPES, db_index=True)
+    slug = models.SlugField(max_length=50, blank=True, unique=True)
+    variant = models.CharField(max_length=50, blank=True, help_text="Variant of the stage, e.g., 'Double Elimination'")
+    order = models.PositiveIntegerField(help_text="Order of the stage in the tournament")
+    start_date = models.DateField(db_index=True)
+    end_date = models.DateField(db_index=True)
+    tier = models.CharField(max_length=2, choices=TIER_STAGE_CHOICES, db_index=True)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, db_index=True)
+
+    class Meta:
+        ordering = ['tournament', 'order']
+        verbose_name = 'Stage'
+        verbose_name_plural = 'Stages'
+        indexes = [
+            models.Index(fields=['tournament', 'stage_type', 'variant']),
+            models.Index(fields=['start_date']),
+            models.Index(fields=['end_date']),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['tournament', 'stage_type', 'variant'],
+                name='unique_stage_type_variant_per_tournament',
+                deferrable=models.Deferrable.DEFERRED
+            ),
+            models.CheckConstraint(
+                check=Q(end_date__gte=F('start_date')),
+                name='stage_end_date_after_start_date'
+            ),
+            models.UniqueConstraint(
+                fields=['tournament', 'order'],
+                name='unique_stage_order_per_tournament',
+                deferrable=models.Deferrable.DEFERRED
+            ),
+            models.CheckConstraint(
+                check=Q(order__gte=1),
+                name='stage_order_gte_1'
+            ),
+        ]
+
+    def __str__(self):
+        type_label = dict(STAGE_TYPES).get(self.stage_type, self.stage_type.title())
+        return f'{type_label}{f" - {self.variant}" if self.variant else ""} ({self.tournament.name})'
+
+    def clean(self):
+        super().clean()
+
+        if not self.tournament_id:
+            raise ValidationError("Tournament must be set for the stage.")
+        
+        if self.start_date and self.end_date and self.end_date < self.start_date:
+            raise ValidationError("End date must be after or equal to start date.")
+        t = self.tournament
+        if (t.start_date and self.start_date and self.start_date < t.start_date) or \
+           (t.end_date and self.end_date and self.end_date > t.end_date):
+            raise ValidationError("Stage dates must be within the tournament dates.")
+        
+    def compute_status(self):
+        today = timezone.localdate()
+        if self.start_date and self.end_date:
+            if today < self.start_date:
+                return 'UPCOMING'
+            elif self.start_date <= today <= self.end_date:
+                return 'ONGOING'
+            else:
+                return 'COMPLETED'
+        return 'UPCOMING'
+    
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            base = build_stage_slug_base(self)
+            candidate = base
+        else:
+            candidate = self.slug
+        self.slug = ensure_unique_slug(candidate, self.__class__, instance_pk=self.pk)
+        self.status = self.compute_status()
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+
+class Series(TimeStampedModel):
+    tournament = models.ForeignKey(Tournament, related_name='series', on_delete=models.CASCADE, db_index=True)
+    stage = models.ForeignKey(Stage, related_name='series', on_delete=models.CASCADE, db_index=True)
+    team1 = models.ForeignKey(Team, related_name='series_as_team1', on_delete=models.CASCADE, db_index=True)
+    team2 = models.ForeignKey(Team, related_name='series_as_team2', on_delete=models.CASCADE, db_index=True)
+    winner = models.ForeignKey(Team, related_name='series_won', on_delete=models.SET_NULL, null=True, blank=True, db_index=True)
+    best_of = models.PositiveIntegerField(choices=[(1, 'Bo1'), (3, 'Bo3'), (5, 'Bo5'), (7, 'Bo7')], default=3)
+    scheduled_date = models.DateTimeField(db_index=True)
+    score = models.CharField(max_length=20, blank=True, help_text="Score in format 'Team1Score-Team2Score', e.g., '2-1'")
+
+    class Meta:
+        ordering = ['-scheduled_date']
+        verbose_name = 'Series'
+        verbose_name_plural = 'Series'
+        indexes = [
+            models.Index(fields=['tournament']),
+            models.Index(fields=['stage']),
+            models.Index(fields=['team1']),
+            models.Index(fields=['team2']),
+            models.Index(fields=['winner']),
+            models.Index(fields=['scheduled_date']),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['stage', 'team1', 'team2'],
+                name='unique_series_per_stage_teams',
+                deferrable=models.Deferrable.DEFERRED
+            ),
+            models.CheckConstraint(
+                check=~Q(team1=F('team2')),
+                name='teams_must_be_different_in_series'
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.team1.short_name} vs {self.team2.short_name} - {self.stage}"
+
+    def compute_score_and_winner(self, persist: bool = True):
+        from competitions.models import Game
+        if not self.pk or not self.team1_id or not self.team2_id:
+            return self.score, self.winner
+        
+        t1 = t2 = 0
+        for g in Game.objects.filter(series_id=self.pk):
+            if g.result_type == 'NO_CONTEST':
+                continue
+            if g.result_type == 'FORFEIT_TEAM1':
+                t1 += 1
+                continue
+            if g.result_type == 'FORFEIT_TEAM2':
+                t2 += 1
+                continue
+            if g.winner_id == self.team1_id:
+                t1 += 1
+            elif g.winner_id == self.team2_id:
+                t2 += 1
+
+        score_str = f"{t1}-{t2}"
+        needed = (self.best_of // 2) + 1
+        winner = self.team1 if t1 >= needed else self.team2 if t2 >= needed else None
+
+        if persist and (self.score != score_str or (self.wnner_id or None) != (winner.id if winner else None)):
+            self.__class__.objects.filter(pk=self.pk).update(score=score_str, winner=winner)
+            self.score = score_str
+            self.winner = winner
+            
+        return score_str, winner
+
+    def clean(self):
+        super().clean()
+        errors = {}
+        if not self.tournament_id:
+            errors['tournament'] = "Tournament must be set for the series."
+        if not self.stage_id:
+            errors['stage'] = "Stage must be set for the series."
+        elif self.stage.tournament_id and self.stage.tournament_id != self.tournament_id:
+            errors['stage'] = "Stage must belong to the same tournament as the series."
+
+        if self.team1_id and self.team2_id and self.team1_id == self.team2_id:
+            errors['team2'] = "Team 2 must be different from Team 1."
+
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+class Game(TimeStampedModel):
+    RESULT_CHOICES = [
+        ('NORMAL', 'Normal Win'),
+        ('FORFEIT_TEAM1', 'Forfeit - Team 1 Wins'),
+        ('FORFEIT_TEAM2', 'Forfeit - Team 2 Wins'),
+        ('NO_CONTEST', 'No Contest / Cancelled'),
+    ]
+    series = models.ForeignKey(Series, related_name='games', on_delete=models.CASCADE, db_index=True)
+    game_no = models.PositiveIntegerField(help_text="Game number in the series, e.g., 1 for Game 1")
+    blue_side = models.ForeignKey(Team, related_name='games_as_blue_side', on_delete=models.CASCADE, db_index=True)
+    red_side = models.ForeignKey(Team, related_name='games_as_red_side', on_delete=models.CASCADE, db_index=True)
+    winner = models.ForeignKey(Team, related_name='games_won', on_delete=models.SET_NULL, null=True, blank=True, db_index=True)
+    duration = models.DurationField(help_text="Duration of the game")
+    vod_link = models.URLField(blank=True, help_text="Link to the VOD of the game")
+    result_type = models.CharField(max_length=20, choices=RESULT_CHOICES, default='NORMAL')
+
+    class Meta:
+        unique_together = ('series', 'game_no')
+        ordering = ['series', 'game_no']
+        verbose_name = 'Game'
+        verbose_name_plural = 'Games'
+        indexes = [
+            models.Index(fields=['series']),
+            models.Index(fields=['blue_side']),
+            models.Index(fields=['red_side']),
+            models.Index(fields=['winner']),
+            models.Index(fields=['game_no']),
+            models.Index(fields=['series', 'game_no']),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['series', 'game_no'],
+                name='unique_game_number_per_series',
+                deferrable=models.Deferrable.DEFERRED
+            ),
+            models.CheckConstraint(
+                check=~Q(blue_side=F('red_side')),
+                name='sides_must_be_different'
+            ),
+        ]
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        if self.blue_side not in [self.series.team1, self.series.team2]:
+            raise ValidationError("Blue side team must be one of the series teams.")
+        if self.red_side not in [self.series.team1, self.series.team2]:
+            raise ValidationError("Red side team must be one of the series teams.")
+        if self.winner and self.winner not in [self.blue_side, self.red_side]:
+            raise ValidationError("Winner must be either the blue side or red side team.")
+        
+        if self.blue_side_id == self.red_side_id:
+            raise ValidationError("Blue side and Red side teams must be different.")
+        pair = {self.series.team1_id, self.series.team2_id}
+        if self.blue_side_id not in pair or self.red_side_id not in pair:
+            raise ValidationError("Both teams must be part of the series.")
+        if self.winner and self.winner_id not in pair:
+            raise ValidationError("Winner must be one of the series teams.")
+        if self.game_no < 1 or self.game_no > self.series.best_of:
+            raise ValidationError(f"Game number must be between 1 and {self.series.best_of}.")
+        super().clean()
+
+        # Winner validation based on result_type
+        if self.result_type == 'NORMAL' and not self.winner:
+            raise ValidationError("Winner must be set for normal games.")
+        if self.result_type.startswith('FORFEIT') and self.winner:
+            raise ValidationError("Winner will be determined by forfeit; do not set it manually.")
+        
+    def save(self, *args, **kwargs):
+        if self.result_type == "FORFEIT_TEAM1":
+            self.winner = self.series.team1
+        elif self.result_type == "FORFEIT_TEAM2":
+            self.winner = self.series.team2
+        elif self.result_type == "NO_CONTEST":
+            self.winner = None
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"G{self.game_no} - {self.series}"
+    
+
+SIDE_CHOICES = [
+    ('BLUE', 'Blue Side'),
+    ('RED', 'Red Side'),
+]
+
+class TeamGameStat(TimeStampedModel):
+    game = models.ForeignKey(Game, related_name='team_stats', on_delete=models.CASCADE, db_index=True)
+    team = models.ForeignKey(Team, related_name='game_stats', on_delete=models.CASCADE, db_index=True)
+    side = models.CharField(max_length=5, choices=SIDE_CHOICES, db_index=True)
+
+    # aggregate stats
+    k = models.PositiveIntegerField(default=0, help_text="Kills")
+    d = models.PositiveIntegerField(default=0, help_text="Deaths")
+    a = models.PositiveIntegerField(default=0, help_text="Assists")
+
+    turret_destroyed = models.PositiveIntegerField(default=0)
+    lord_kills = models.PositiveIntegerField(default=0)
+    turtle_kills = models.PositiveIntegerField(default=0)
+    first_blood = models.BooleanField(default=False)
+    game_win = models.BooleanField(default=False, help_text="Indicates if the team won the game")
+    gold = models.PositiveIntegerField(default=0, help_text="Total Gold Earned by the team")
+
+    class Meta:
+        ordering = ['game', 'team']
+        verbose_name = 'Team Game Stat'
+        verbose_name_plural = 'Team Game Stats'
+        indexes = [
+            models.Index(fields=['game']),
+            models.Index(fields=['team']),
+            models.Index(fields=['side']),
+            models.Index(fields=['game', 'team']),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['game', 'team'],
+                name='unique_team_stat_per_game',
+                deferrable=models.Deferrable.DEFERRED
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.team.short_name} Stats - {self.game}"
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        if self.team not in [self.game.blue_side, self.game.red_side]:
+            raise ValidationError("Team must be one of the teams in the game.")
+        expected_side = 'BLUE' if self.team == self.game.blue_side else 'RED'
+        if self.side != expected_side:
+            raise ValidationError(f"Side must be '{expected_side}' for the selected team.")
+        super().clean()
+
+    def recompute_gold(self):
+        total = self.playergamestat_set.aggregate(
+            total=Coalesce(Sum('gold'), 0)
+        )['total']
+        if self.gold != total:
+            self.gold = total
+            self.save(update_fields=['gold', 'updated_at'])
+
+
+ROLE_CHOICES = [
+    ('GOLD', 'Gold Lane'),
+    ('MID', 'Mid Lane'),
+    ('JUNGLE', 'Jungle'),
+    ('EXP', 'Exp Lane'),
+    ('ROAM', 'Roam'),
+]  
+
+class PlayerGameStat(TimeStampedModel):
+    game = models.ForeignKey(Game, related_name='player_stats', on_delete=models.CASCADE, db_index=True)
+    team_stat = models.ForeignKey(TeamGameStat, related_name='player_stats', on_delete=models.CASCADE, db_index=True)
+    player = models.ForeignKey('players.Player', related_name='game_stats', on_delete=models.CASCADE, db_index=True)
+
+    team = models.ForeignKey(Team, related_name='player_game_stats', on_delete=models.CASCADE, db_index=True)
+    role = models.CharField(max_length=10, choices=ROLE_CHOICES, db_index=True)
+    is_MVP = models.BooleanField(default=False, help_text="Indicates if the player was the MVP of the game")
+
+    hero = models.ForeignKey(Hero, on_delete=models.PROTECT, db_index=True)
+
+    k = models.PositiveIntegerField(default=0, help_text="Kills")
+    d = models.PositiveIntegerField(default=0, help_text="Deaths")
+    a = models.PositiveIntegerField(default=0, help_text="Assists")
+    gold = models.PositiveIntegerField(default=0, help_text="Total Gold Earned")
+    dmg_dealt = models.PositiveIntegerField(default=0, help_text="Total Damage Dealt")
+    dmg_taken = models.PositiveIntegerField(default=0, help_text="Total Damage Taken")
+
+    class Meta:
+        unique_together = ('game', 'player')
+        ordering = ['game', 'team', 'role']
+        verbose_name = 'Player Game Stat'
+        verbose_name_plural = 'Player Game Stats'
+        indexes = [
+            models.Index(fields=['game']),
+            models.Index(fields=['player']),
+            models.Index(fields=['team']),
+            models.Index(fields=['role']),
+            models.Index(fields=['game', 'player']),
+            models.Index(fields=['team', 'role']),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['game', 'player'],
+                name='unique_player_stat_per_game',
+                deferrable=models.Deferrable.DEFERRED
+            ),
+            models.CheckConstraint(
+                check=Q(role__in=[choice[0] for choice in ROLE_CHOICES]),
+                name='valid_role_value'
+            ),
+        ]
+    def __str__(self):
+        return f"{self.player.ign} Stats - {self.game}"
+
+    def clean(self):
+        super().clean()
+
+        if self.team_stat.game_id != self.game_id:
+            raise ValidationError("TeamGameStat must belong to the same game as PlayerGameStat.")
+        if self.team_stat.team_id != self.team_id:
+            raise ValidationError("Team in TeamGameStat must match the team in PlayerGameStat.")
+        if self.team_id not in [self.game.blue_side_id, self.game.red_side_id]:
+            raise ValidationError("Team must be one of the teams in the game.")
+        game_day = self.game.series.scheduled_date.date()
+        memberships = self.player.team_memberships.filter(
+            start_date__lte=game_day
+        ).filter(
+            dj_models.Q(end_date__isnull=True) | dj_models.Q(end_date__gte=game_day)
+        ).values_list('team_id', flat=True)
+
+        if self.team_id not in set(memberships):
+            raise ValidationError("Player must be a member of the team on the game day.")
+        
+    @property
+    def minutes(self) -> Decimal:
+        # Game duration in minutes
+        game = self.game if hasattr(self, 'game') else self.team_stat.game
+        dur = getattr(game, 'duration', None)
+        if not dur:
+            return Decimal(1)
+        minutes = Decimal(dur.total_seconds()) / Decimal(60)
+        return minutes if minutes > 0 else Decimal(1)
+
+    @property
+    def kda_rate(self) -> Decimal:
+        deaths = Decimal(self.deaths or 0)
+        denom = deaths if deaths > 0 else Decimal(1)
+        val = (Decimal(self.kills or 0) + Decimal(self.assists or 0)) / denom
+        return val.quantize(Decimal('0.01'))
+    
+    @property
+    def gpm(self) -> Decimal:
+        val = Decimal(self.gold or 0) / self.minutes
+        return val.quantize(Decimal('0.1'), rounding=ROUND_HALF_UP)
+    
+    @property
+    def dpm(self) -> Decimal:
+        val = Decimal(self.dmg_dealt or 0) / self.minutes
+        return val.quantize(Decimal('0.1'), rounding=ROUND_HALF_UP)
+
+class GameDraftAction(TimeStampedModel):
+    game = models.ForeignKey(Game, related_name='draft_actions', on_delete=models.CASCADE, db_index=True)
+    action = models.CharField(max_length=10, choices=[('BAN', 'Ban'), ('PICK', 'Pick')])
+    side = models.CharField(max_length=5, choices=SIDE_CHOICES)
+    order = models.PositiveIntegerField(help_text="Order of the action in the draft, e.g., 1 for first action")
+    hero = models.ForeignKey(Hero, on_delete=models.PROTECT, db_index=True)
+
+    player = models.ForeignKey('players.Player', related_name='draft_actions', on_delete=models.SET_NULL, null=True, blank=True, db_index=True, help_text="Set only for PICK actions; leave null for BAN actions")
+    team = models.ForeignKey(Team, related_name='draft_actions', on_delete=models.CASCADE, db_index=True)
+
+    class Meta:
+        unique_together = ('game', 'order')
+        ordering = ['game', 'order']
+        verbose_name = 'Game Draft Action'
+        verbose_name_plural = 'Game Draft Actions'
+        indexes = [
+            models.Index(fields=['game']),
+            models.Index(fields=['team']),
+            models.Index(fields=['side']),
+            models.Index(fields=['action']),
+            models.Index(fields=['hero']),
+            models.Index(fields=['game', 'order']),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['game', 'order'],
+                name='unique_draft_action_order_per_game',
+                deferrable=models.Deferrable.DEFERRED
+            ),
+            models.CheckConstraint(
+                check=Q(action__in=['BAN', 'PICK']),
+                name='valid_action_value'
+            ),
+            models.CheckConstraint(
+                check=Q(side__in=['BLUE', 'RED']),
+                name='valid_side_value_draft'
+            ),
+        ]
+    def clean(self):
+        super().clean()
+
+        # Validate that the team is part of the series
+        if self.team_id not in [self.game.series.team1_id, self.game.series.team2_id]:
+            raise ValidationError("Team must be one of the teams in the series.")
+        
+        # Validate that side must match the team
+        expected_side = 'BLUE' if self.team_id == self.game.series.team1_id and self.game.blue_side_id == self.game.series.team1_id \
+                    else 'RED' if self.team_id == self.game.series.team2_id and self.game.red_side_id == self.game.series.team2_id \
+                    else None
+        if expected_side and self.side != expected_side:
+            raise ValidationError(f"Side must be '{expected_side}' for the selected team.")
+        
+        # action-specific validations
+        if self.action == 'BAN':
+            if self.player_id:
+                raise ValidationError("Player must be null for BAN actions.")
+            elif self.action == 'PICK':
+                if not self.player_id:
+                    raise ValidationError('Player is required for PICK actions.')
+                
+            # Ensure the player was on the team during the game day
+            game_day = self.game.series.scheduled_date.date()
+            memberships = self.player.team_memberships.filter(
+                start_date__lte=game_day
+            ).filter(
+                Q(end_date__isnull=True) | Q(end_date__gte=game_day)
+            ).values_list('team_id', flat=True)
+
+            if self.team_id not in set(memberships):
+                raise ValidationError("Player must be a member of the team on the game day.")
+
+    def __str__(self):
+        return f"{self.game} - {self.get_action_display()} {self.hero.name} ({self.side})"
+    
+from django.db.models.signals import post_save, post_delete
+from django.dispatch import receiver
+
+@receiver([post_save, post_delete], sender=Game)
+def update_series_result(sender, instance, **kwargs):
+    series = instance.series
+    if series_id := getattr(series, 'id', None):
+        try:
+            series.compute_score_and_winner()
+        except Exception as e:
+            print(f"Error updating series {series_id} after game change: {e}")
+
+@receiver([post_save, post_delete], sender='competitions.PlayerGameStat')
+def _pgs_touch_team_gold(sender, instance, **kwargs):
+    team_stat = getattr(instance, 'team_stat', None)
+    if not team_stat:
+        return
+    transaction.on_commit(lambda: team_stat.recompute_gold())
+
+@receiver([post_save, post_delete], sender='competitions.TeamGameStat')
+def _tgs_recompute_on_create(sender, instance, created, **kwargs):
+    if created:
+        transaction.on_commit(lambda: instance.recompute_gold())
+
+@receiver([post_save, post_delete], sender='competitions.Game')
+def update_series_result(sender, instance, **kwargs):
+    series = instance.series
+    if getattr(series, 'pk', None):
+        series.compute_score_and_winner(persist=True)
