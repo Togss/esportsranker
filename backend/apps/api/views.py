@@ -3,10 +3,13 @@ import rest_framework.filters as filters
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import viewsets
 from rest_framework.response import Response
+from django.db.models import Q
 from apps.teams.models import Team
 from apps.teams.serializers import TeamSerializer
+from apps.teams import selectors as team_selectors
 from apps.players.models import Player
 from apps.players.serializers import PlayerSerializer
+from apps.competitions import selectors as comp_selectors
 from apps.competitions.models import (
     Tournament,
     Stage,
@@ -25,6 +28,12 @@ from apps.competitions.serializers import (
     PlayerGameStatSerializer,
     GameDraftActionSerializer
 )
+from apps.staff.models import Staff
+from apps.staff.serializers import StaffSerializer
+from apps.staff import selectors as staff_selectors
+from apps.heroes import selectors as hero_selectors
+from apps.heroes.models import Hero
+from apps.heroes.serializers import HeroSerializer
 
 
 class TeamViewSet(viewsets.ReadOnlyModelViewSet):
@@ -57,6 +66,22 @@ class TeamViewSet(viewsets.ReadOnlyModelViewSet):
         "name",
         "short_name",
     ]
+
+    def get_queryset(self):
+        query = self.request.query_params.get("search")
+        region = self.request.query_params.get("region")
+        is_active_raw = self.request.query_params.get("is_active")
+
+        if is_active_raw is None:
+            is_active = None
+        else:
+            is_active = is_active_raw.lower() in ["1", "true", "t", "yes", "y"]
+
+        return team_selectors.search_teams(
+            query=query,
+            region=region,
+            is_active=is_active
+        )
 
 
 class PlayerViewSet(viewsets.ReadOnlyModelViewSet):
@@ -91,15 +116,58 @@ class PlayerViewSet(viewsets.ReadOnlyModelViewSet):
         "slug",
     ]
 
+    def search_players(
+        query: str | None = None,
+        role: str | None = None,
+        nationality: str | None = None,
+        active_only: bool | None = None,
+    ):
+        qs = Player.objects.all()
+
+        # fuzzy search by IGN or full name (SluggedModel.name)
+        if query:
+            qs = qs.filter(
+                Q(ign__icontains=query)
+                | Q(name__icontains=query)
+            )
+
+        # filter by role
+        if role:
+            qs = qs.filter(role=role)
+
+        # nationality is stored as uppercase ISO alpha-2
+        if nationality:
+            qs = qs.filter(nationality__iexact=nationality)
+
+        # active_only -> is_active
+        if active_only is not None:
+            qs = qs.filter(is_active=active_only)
+
+        # We know Player.Meta.ordering = ['ign']
+        # Prefetch memberships so serializers / views can access roster info without N+1 queries
+        qs = qs.prefetch_related(
+            "memberships__team",
+        ).only(
+            "id",
+            "ign",
+            "name",
+            "slug",
+            "role",
+            "nationality",
+            "is_active",
+            "photo",
+            "created_at",
+            "updated_at",
+        )
+
+        return qs
+
 class HeroViewSet(viewsets.ReadOnlyModelViewSet):
     """
     Public read-only API for Heroes.
     /api/v1/heroes/       → list of heroes
     /api/v1/heroes/<id>/  → hero details
     """
-    from apps.heroes.models import Hero
-    from apps.heroes.serializers import HeroSerializer
-
     queryset = Hero.objects.all().order_by("name")
     serializer_class = HeroSerializer
 
@@ -124,9 +192,17 @@ class HeroViewSet(viewsets.ReadOnlyModelViewSet):
         "slug",
     ]
 
+    def get_queryset(self):
+        query = self.request.query_params.get("search")
+        hero_class = self.request.query_params.get("hero_class")
+
+        return hero_selectors.search_heroes(
+            query=query,
+            hero_class=hero_class
+        )
+
+
 class StaffViewSet(viewsets.ReadOnlyModelViewSet):
-    from apps.staff.models import Staff
-    from apps.staff.serializers import StaffSerializer
     """
     Public read-only API for Staff.
     /api/v1/staff/       → list active staff members
@@ -157,6 +233,24 @@ class StaffViewSet(viewsets.ReadOnlyModelViewSet):
         "slug",
     ]
 
+    def get_queryset(self):
+        query = self.request.query_params.get("search")
+        role = self.request.query_params.get("primary_role")
+        nationality = self.request.query_params.get("nationality")
+
+        raw_active = self.request.query_params.get("active_only")
+        if raw_active is None:
+            active_only = None
+        else:
+            active_only = raw_active.lower() in ["1", "true", "t", "yes", "y"]
+
+        return staff_selectors.search_staff(
+            query=query,
+            role=role,
+            nationality=nationality,
+            active_only=active_only
+        )
+
 
 class TournamentViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = (
@@ -174,6 +268,21 @@ class TournamentViewSet(viewsets.ReadOnlyModelViewSet):
     ordering_fields = ["start_date", "end_date", "tier"]
     search_fields = ["name", "slug"]
     pagination_class = None  # Disable pagination for tournaments
+
+    def get_queryset(self):
+        qs = comp_selectors.get_active_tournaments()
+
+        region = self.request.query_params.get("region")
+        tier = self.request.query_params.get("tier")
+        status = self.request.query_params.get("status")
+
+        if region:
+            qs = qs.filter(region=region)
+        if tier:
+            qs = qs.filter(tier=tier)
+        if status:
+            qs = qs.filter(status=status)
+        return qs
 
 
 class StageViewSet(viewsets.ReadOnlyModelViewSet):

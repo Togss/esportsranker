@@ -73,7 +73,7 @@ class TeamGameStatInline(admin.TabularInline):
         "side",
         "game_result",
         "gold",
-        "score",
+        "t_score",
         "tower_destroyed",
         "lord_kills",
         "turtle_kills",
