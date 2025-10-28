@@ -785,11 +785,6 @@ class TeamGameStatReadonlyAdmin(RoleProtectedAdmin):
     def has_delete_permission(self, request, obj=None): return False
     def get_readonly_fields(self, request, obj=None):
         return _readonly_fields_for(TeamGameStat)
-    
-    @admin.display(description="Score")
-    def t_score(self, obj: TeamGameStat):
-        return obj.t_score if obj.t_score is not None else "—"
-    description = "Score"
 
 @admin.register(PlayerGameStat)
 class PlayerGameStatReadonlyAdmin(RoleProtectedAdmin):

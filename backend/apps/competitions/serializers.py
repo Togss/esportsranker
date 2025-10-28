@@ -49,7 +49,7 @@ class TeamGameStatSerializer(serializers.ModelSerializer):
             "id", "team_name", "side",
             "tower_destroyed", "lord_kills", "turtle_kills",
             "orange_buff", "purple_buff", "game_result",
-            "gold", "score",
+            "gold", "t_score",
         ]
 
 

@@ -1,13 +1,50 @@
 from rest_framework.views import APIView
-from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from drf_spectacular.utils import extend_schema, OpenApiResponse, OpenApiExample
+from rest_framework.response import Response
 from rest_framework import status
+
 
 from apps.accounts.models import UserRole
 
 class WhoAmIView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        operation_id="whoami",
+        summary="Get information about the currently authenticated user",
+        description='Returns ID, username, role, and capability flags based on role. Works with JWT or session auth.',
+        responses={
+            200: OpenApiResponse(
+                response=dict,
+                description="Current user data and permissions",
+                examples=[
+                    OpenApiExample(
+                        "Admin example",
+                        value={
+                            "id": 1,
+                            "username": "togadmin",
+                            "email": "togadmin@hayatefinance.com",
+                            "role": "admin",
+                            "is_staff": True,
+                            "is_superuser": False,
+                            "permissions": {
+                                "can_edit_teams": True,
+                                "can_edit_staff": True,
+                                "can_edit_players": True,
+                                "can_edit_heroes": True,
+                                "can_edit_tournaments": True,
+                                "can_edit_stages": True,
+                                "can_edit_series": True,
+                                "can_edit_games": True,
+                                "can_view_admin": True,
+                            }
+                        }
+                    )
+                ]
+            )
+        }
+    )
     def get(self, request):
         user = request.user
         return Response({
