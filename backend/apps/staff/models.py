@@ -1,10 +1,12 @@
 from datetime import date
 from django.db import models
 from django.db.models import Q
-from django.core.validators import RegexValidator
-from django.core.exceptions import ValidationError
 
-from apps.common.models import TimeStampedModel, SluggedModel
+from apps.common.models import (
+    TimeStampedModel,
+    SluggedModel,
+    UserStampedModel,
+)
 from apps.common.enums import StaffRole
 from apps.common.validators import (
         NATIONALITY_VALIDATOR,
@@ -18,7 +20,7 @@ def staff_photo_upload_to(instance, filename: str) -> str:
     ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
     return f"staff/photos/{instance.slug}.{ext}" if ext else f"staff/photos/{instance.slug}"
 
-class Staff(TimeStampedModel, SluggedModel):
+class Staff(TimeStampedModel, SluggedModel, UserStampedModel):
     # SluggedModel gives: name (real / display), slug
     handle = models.CharField(
         max_length=24,
@@ -79,7 +81,7 @@ class Staff(TimeStampedModel, SluggedModel):
             NATIONALITY_VALIDATOR(self.nationality)
 
 
-class StaffMembership(TimeStampedModel):
+class StaffMembership(TimeStampedModel, UserStampedModel):
     staff = models.ForeignKey(
         'staff.Staff',
         on_delete=models.CASCADE,

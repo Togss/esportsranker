@@ -240,6 +240,8 @@ class TournamentAdmin(RoleProtectedAdmin):
         "created_at",
         "updated_at",
         "stage_label",
+        "created_by",
+        "updated_by"
     )
     inlines = [StageInline, TournamentTeamInline]
 
@@ -273,15 +275,23 @@ class TournamentAdmin(RoleProtectedAdmin):
             )
         }),
         (
-            "Timestamps", {
+            "Audit Info", {
                 "classes": ("collapse",),
                 "fields": (
                     "created_at",
-                    "updated_at"
+                    "updated_at",
+                    "created_by",
+                    "updated_by"
                 )
             }
         ),
     )
+
+    def save_model(self, request, obj, form, change):
+        if not change and not obj.created_by:
+            obj.created_by = request.user
+        obj.updated_by = request.user
+        super().save_model(request, obj, form, change)
 
     # --- Custom Displays ---
     @admin.display(description="Logo")
@@ -380,6 +390,8 @@ class StageAdmin(RoleProtectedAdmin):
         "status",
         "created_at",
         "updated_at",
+        "created_by",
+        "updated_by"
     )
 
     # Inline: show all Series (matches) that belong to this Stage
@@ -402,15 +414,23 @@ class StageAdmin(RoleProtectedAdmin):
                 "end_date",
             )
         }),
-        ("Timestamps / System", {
+        ("Audit Info", {
             "classes": ("collapse",),
             "fields": (
                 "status",
                 "created_at",
                 "updated_at",
+                "created_by",
+                "updated_by"
             )
         }),
     )
+
+    def save_model(self, request, obj, form, change):
+        if not change and not obj.created_by:
+            obj.created_by = request.user
+        obj.updated_by = request.user
+        super().save_model(request, obj, form, change)
 
     def get_queryset(self, request):
         """
@@ -485,12 +505,18 @@ class SeriesAdmin(RoleProtectedAdmin):
     )
     ordering = ("-scheduled_date",)
     autocomplete_fields = ("tournament", "stage", "team1", "team2", "winner")
-    readonly_fields = ("score", "winner", "created_at", "updated_at")
+    readonly_fields = ("score", "winner", "created_at", "updated_at", "created_by", "updated_by")
     fieldsets = (
         (None, {"fields": ("tournament", "stage", "team1", "team2", "best_of", "scheduled_date")}),
         ("Results", {"fields": ("score", "winner")}),
-        ("Timestamps", {"classes": ("collapse",), "fields": ("created_at", "updated_at")}),
+        ("Audit Info", {"classes": ("collapse",), "fields": ("created_by", "updated_by", "created_at", "updated_at")}),
     )
+    
+    def save_model(self, request, obj, form, change):
+        if not change and not obj.created_by:
+            obj.created_by = request.user
+        obj.updated_by = request.user
+        super().save_model(request, obj, form, change)
 
     @admin.display(description="Series Matchup")
     def series_matchup(self, obj):
@@ -597,15 +623,34 @@ class GameAdmin(RoleProtectedAdmin):
         "series__team1__name", "series__team1__short_name",
         "series__team2__name", "series__team2__short_name",
     )
-    fields = (
-        "series",
-        "game_no",
-        "blue_side",
-        "red_side",
-        "result_type",
-        "winner",
-        "duration_display",
-        "vod_link",
+    readonly_fields = (
+        "created_at",
+        "updated_at",
+        "created_by",
+        "updated_by"
+    )
+    fieldsets = (
+        (None, {
+            "fields": (
+                "series",
+                "game_no",
+                "blue_side",
+                "red_side",
+                "result_type",
+                "winner",
+                "duration_display",
+                "vod_link",
+            )
+        }),        
+        ("Audit Info", {
+            "classes": ("collapse",),
+            "fields": (
+                "created_by",
+                "updated_by",
+                "created_at",
+                "updated_at"
+            )
+        }),
     )
     inlines = [
         GameDraftActionInline,
@@ -615,6 +660,9 @@ class GameAdmin(RoleProtectedAdmin):
     ]
 
     def save_model(self, request, obj, form, change):
+        if not change and not obj.created_by:
+            obj.created_by = request.user
+        obj.updated_by = request.user
         # On first save, create the two TeamGameStat rows (Blue/Red) so that inlines can link to them
         is_creating = obj.pk is None
         super().save_model(request, obj, form, change)

@@ -2,7 +2,7 @@ from django.db import models
 from django.core.exceptions import ValidationError
 from django.db.models import UniqueConstraint
 from django.db.models.functions import Lower
-from apps.common.models import TimeStampedModel, SluggedModel
+from apps.common.models import TimeStampedModel, SluggedModel, UserStampedModel
 from apps.common.enums import HeroClass
 
 
@@ -10,7 +10,7 @@ def hero_icon_upload_to(instance, filename: str) -> str:
     ext = f'.{filename.rsplit(".", 1)[-1].lower()}' if "." in filename else ""
     return f'heroes/icons/{instance.slug}{ext}'
 
-class Hero(SluggedModel, TimeStampedModel):
+class Hero(SluggedModel, TimeStampedModel, UserStampedModel):
     primary_class = models.CharField(
         max_length=20, choices=HeroClass.choices,
         db_index=True

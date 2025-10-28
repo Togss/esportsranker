@@ -1,7 +1,7 @@
 from django.db import models
 from django.db.models import Q
 from django.core.validators import MinValueValidator, MaxValueValidator, MinLengthValidator, RegexValidator
-from apps.common.models import TimeStampedModel, SluggedModel
+from apps.common.models import TimeStampedModel, SluggedModel, UserStampedModel
 from apps.common.enums import Region
 from apps.common.validators import TEAM_SHORT_NAME_VALIDATOR
 
@@ -10,7 +10,7 @@ def team_logo_upload_to(instance, filename):
     base = (instance.slug or instance.name).lower().replace(" ", "_")
     return f'team_logos/{base}{ext}' if ext else f'team_logos/{base}'
 
-class Team(SluggedModel, TimeStampedModel):
+class Team(SluggedModel, TimeStampedModel, UserStampedModel):
     short_name = models.CharField(
         max_length=10,
         unique=True,
