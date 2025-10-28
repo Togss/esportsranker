@@ -15,7 +15,40 @@ from apps.competitions.models import (
     TeamGameStat, PlayerGameStat, GameDraftAction, TournamentTeam
 )
 from apps.teams.models import Team
+from apps.accounts.models import UserRole
 
+# UserRoleAdmin
+class RoleRestrictedAdmin(admin.ModelAdmin):
+    def has_module_permission(selff, request):
+        if not request.user.is_authenticated:
+            return False
+        if not request.user.is_staff:
+            return False
+        return True
+    
+    def has_view_permission(self, request, obj=None):
+        if not request.user.is_authenticated or not request.user.is_staff:
+            return False
+        return True
+
+    def has_add_permission(self, request):
+        if not request.user.is_authenticated or not request.user.is_staff:
+            return False
+        return request.user.role in {UserRole.ADMIN, UserRole.MODERATOR}
+    
+    def has_change_permission(self, request, obj=None):
+        if not request.user.is_authenticated or not request.user.is_staff:
+            return False
+        return request.user.role in {UserRole.ADMIN}
+
+    def has_delete_permission(self, request, obj=None):
+        if not request.user.is_authenticated or not request.user.is_staff:
+            return False
+        return request.user.role in {UserRole.ADMIN}
+    
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs
 
 # ---------- Inlines ----------
 class SeriesInline(admin.TabularInline):
@@ -73,7 +106,7 @@ class TeamGameStatInline(admin.TabularInline):
         "side",
         "game_result",
         "gold",
-        "score",
+        "t_score",
         "tower_destroyed",
         "lord_kills",
         "turtle_kills",
@@ -218,7 +251,7 @@ class TournamentTeamInline(admin.TabularInline):
 # ---------- Admins ----------
 
 @admin.register(Tournament)
-class TournamentAdmin(admin.ModelAdmin):
+class TournamentAdmin(RoleRestrictedAdmin):
     list_display = (
         "logo_thumb",
         "name",
@@ -336,7 +369,7 @@ class TournamentAdmin(admin.ModelAdmin):
     
 # ----- Stage Admin -----
 @admin.register(Stage)
-class StageAdmin(admin.ModelAdmin):
+class StageAdmin(RoleRestrictedAdmin):
     # What you see in the /admin/competitions/stage/ list view
     list_display = (
         "stage_label",      # e.g. "Playoffs Stage - Upper Bracket"
@@ -474,7 +507,7 @@ class SeriesAdminForm(forms.ModelForm):
 
 
 @admin.register(Series)
-class SeriesAdmin(admin.ModelAdmin):
+class SeriesAdmin(RoleRestrictedAdmin):
     form = SeriesAdminForm
     list_display = ("series_matchup", "stage", "score", "winner", "best_of", "scheduled_date")
     list_filter = ("tournament", "stage", "best_of")
@@ -585,7 +618,7 @@ class GameAdminForm(forms.ModelForm):
         return super().save(commit=commit)
     
 @admin.register(Game)
-class GameAdmin(admin.ModelAdmin):
+class GameAdmin(RoleRestrictedAdmin):
     form = GameAdminForm
     list_display = (
         "series", "game_no",
@@ -681,7 +714,7 @@ def _readonly_fields_for(model):
     return [f.name for f in model._meta.fields] + [m.name for m in model._meta.many_to_many]
 
 @admin.register(TeamGameStat)
-class TeamGameStatReadonlyAdmin(admin.ModelAdmin):
+class TeamGameStatReadonlyAdmin(RoleRestrictedAdmin):
     list_display = ('game', 'team', 'side', 'game_result', 'gold', 't_score',
                     'tower_destroyed', 'lord_kills', 'turtle_kills',
                     'orange_buff', 'purple_buff')
@@ -696,7 +729,7 @@ class TeamGameStatReadonlyAdmin(admin.ModelAdmin):
         return _readonly_fields_for(TeamGameStat)
 
 @admin.register(PlayerGameStat)
-class PlayerGameStatReadonlyAdmin(admin.ModelAdmin):
+class PlayerGameStatReadonlyAdmin(RoleRestrictedAdmin):
     list_display = ('game', 'team', 'player', 'role', 'hero', 'k', 'd', 'a',
                     'gold', 'dmg_dealt', 'dmg_taken', 'is_MVP')
     list_filter = ('role', 'team', 'game__series__tournament', 'game__series')
@@ -710,7 +743,7 @@ class PlayerGameStatReadonlyAdmin(admin.ModelAdmin):
         return _readonly_fields_for(PlayerGameStat)
 
 @admin.register(GameDraftAction)
-class GameDraftActionReadonlyAdmin(admin.ModelAdmin):
+class GameDraftActionReadonlyAdmin(RoleRestrictedAdmin):
     list_display = ('game', 'order', 'action', 'side', 'hero', 'player')
     list_filter = ('action', 'side', 'game__series__tournament', 'game__series')
     search_fields = ('hero__name', 'player__name', 'game__series__tournament__name')
