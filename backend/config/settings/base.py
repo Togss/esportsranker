@@ -16,6 +16,7 @@ ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=['127.0.0.1', 'localhost'])
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
+AUTH_USER_MODEL = 'accounts.User'
 
 # Application definition
 
@@ -82,7 +83,7 @@ WSGI_APPLICATION = 'config.wsgi.application'
 DATABASES = {
     'default': env.db(
         'DATABASE_URL',
-        default='postgres://ranker_user:ranker_pass@localhost:5432/esportsranker'
+        default='postgres://ranker_user:ranker_pass@localhost:5432/esportsranker_dev'
     )
 }
 
