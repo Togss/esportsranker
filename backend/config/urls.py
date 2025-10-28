@@ -6,6 +6,7 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('api/auth', include('apps.accounts.urls')),  # JWT auth endpoints
 
     # Public API (v1)
     path('api/v1/', include('apps.api.urls')),  # All public endpoints centralized here
