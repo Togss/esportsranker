@@ -1,5 +1,11 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
+from apps.api.auth_views import WhoAmIView
+from apps.api.jwt_views import EsportsTokenObtainPairView
+from rest_framework_simplejwt.views import (
+    TokenRefreshView,
+    TokenVerifyView,
+)
 from .views import (
     TeamViewSet,
     PlayerViewSet,
@@ -31,4 +37,9 @@ router.register(r'game-draft-actions', GameDraftActionViewSet, basename='gamedra
 
 urlpatterns = [
     path("", include(router.urls)),
+    path("auth/whoami/", WhoAmIView.as_view(), name="whoami"),
+
+    path("auth/token/", EsportsTokenObtainPairView.as_view(), name="token_obtain"),
+    path("auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
+    path("auth/token/verify/", TokenVerifyView.as_view(), name="token_verify"),
 ]
