@@ -615,8 +615,12 @@ class GameAdminForm(forms.ModelForm):
 class GameAdmin(RoleProtectedAdmin):
     form = GameAdminForm
     list_display = (
-        "series", "game_no",
-        "blue_side", "red_side", "duration", "winner"
+        "game_no",
+        "series",
+        "blue_side",
+        "red_side",
+        "duration",
+        "winner"
     )
     list_filter = ("series__tournament", "series__stage", "result_type")
     search_fields = (
@@ -663,29 +667,67 @@ class GameAdmin(RoleProtectedAdmin):
         if not change and not obj.created_by:
             obj.created_by = request.user
         obj.updated_by = request.user
-        # On first save, create the two TeamGameStat rows (Blue/Red) so that inlines can link to them
-        is_creating = obj.pk is None
+
+        is_creating = not change
+
         super().save_model(request, obj, form, change)
+
         if is_creating and obj.blue_side_id and obj.red_side_id:
             def _after_commit():
-                TeamGameStat.objects.get_or_create(
+                blue_stat, created_blue = TeamGameStat.objects.get_or_create(
                     game=obj,
                     team_id=obj.blue_side_id,
-                    defaults={"side": "BLUE"}
+                    defaults={
+                        "side": "BLUE",
+                        "created_by": request.user,
+                        "updated_by": request.user
+                    },
                 )
-                TeamGameStat.objects.get_or_create(
+                if not created_blue:
+                    if blue_stat.updated_by_id != request.user.id:
+                        blue_stat.updated_by = request.user
+                        blue_stat.save(update_fields=["updated_by", "updated_at"])
+
+                red_stat, created_red = TeamGameStat.objects.get_or_create(
                     game=obj,
                     team_id=obj.red_side_id,
-                    defaults={"side": "RED"}
+                    defaults={
+                        "side": "RED",
+                        "created_by": request.user,
+                        "updated_by": request.user
+                    },
                 )
+                if not created_red:
+                    if red_stat.updated_by_id != request.user.id:
+                        red_stat.updated_by = request.user
+                        red_stat.save(update_fields=["updated_by", "updated_at"])
             transaction.on_commit(_after_commit)
 
     def save_formset(self, request, form, formset, change):
         super().save_formset(request, form, formset, change)
 
-        if isinstance(formset, (BlueSideFormSet, RedSideFormSet)):
-            game = form.instance
+        game = form.instance
 
+        if isinstance(formset, (BlueSideFormSet, RedSideFormSet, TeamGameStatInline.formset)):
+            team_stats = TeamGameStat.objects.filter(game=game)
+
+            for ts in team_stats:
+                changed_fields = []
+
+                if ts.created_by_id is None:
+                    ts.created_by = request.user
+                    changed_fields.append("created_by")
+
+                if ts.updated_by_id != request.user.id:
+                    ts.updated_by = request.user
+                    changed_fields.append("updated_by")
+
+                if changed_fields:
+                    if "updated_by" in changed_fields and "updated_at" not in changed_fields:
+                        changed_fields.append("updated_at")
+                    ts.save(update_fields=changed_fields)
+        
+        if isinstance(formset, (BlueSideFormSet, RedSideFormSet)):
             self._defer_player_count_check = True
             self._last_game_for_count = game
 
@@ -731,7 +773,7 @@ def _readonly_fields_for(model):
 
 @admin.register(TeamGameStat)
 class TeamGameStatReadonlyAdmin(RoleProtectedAdmin):
-    list_display = ('game', 'team', 'side', 'game_result', 'gold', 't_score',
+    list_display = ('team', 'game', 'side', 'game_result', 'gold', 't_score',
                     'tower_destroyed', 'lord_kills', 'turtle_kills',
                     'orange_buff', 'purple_buff')
     list_filter = ('side', 'game_result', 'game__series__tournament', 'game__series')
@@ -743,10 +785,15 @@ class TeamGameStatReadonlyAdmin(RoleProtectedAdmin):
     def has_delete_permission(self, request, obj=None): return False
     def get_readonly_fields(self, request, obj=None):
         return _readonly_fields_for(TeamGameStat)
+    
+    @admin.display(description="Score")
+    def t_score(self, obj: TeamGameStat):
+        return obj.t_score if obj.t_score is not None else "—"
+    description = "Score"
 
 @admin.register(PlayerGameStat)
 class PlayerGameStatReadonlyAdmin(RoleProtectedAdmin):
-    list_display = ('game', 'team', 'player', 'role', 'hero', 'k', 'd', 'a',
+    list_display = ('player', 'team', 'game', 'role', 'hero', 'k', 'd', 'a',
                     'gold', 'dmg_dealt', 'dmg_taken', 'is_MVP')
     list_filter = ('role', 'team', 'game__series__tournament', 'game__series')
     search_fields = ('player__name', 'game__series__tournament__name', 'team__name')

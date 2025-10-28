@@ -22,13 +22,6 @@ from apps.teams.models import Team
 # ---------------------------------------------------------------------------------
 
 def compute_series_score_and_winner(series: Series) -> Tuple[str, Optional[Team]]:
-    """
-    Pure function: reads series.games and returns (score_str, winner_team_or_None).
-
-    - Relies on Game.winner
-    - Ignores NO_CONTEST / winner=None games
-    - Does NOT write to DB
-    """
     if not series.team1_id or not series.team2_id:
         return "0-0", None
 

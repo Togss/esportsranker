@@ -461,25 +461,19 @@ class Series(TimeStampedModel, UserStampedModel):
 
     def compute_score_and_winner(self, persist: bool = True):
         from .services import compute_series_score_and_winner
-        score_str, winner_id = compute_series_score_and_winner(self)
 
-        winner_obj = None
-        if winner_id:
-            try:
-                winner_obj = Team.objects.get(pk=winner_id)
-            except Team.DoesNotExist:
-                winner_obj = None
-
+        score_str, winner_team = compute_series_score_and_winner(self)
+        winner_id = winner_team.id if winner_team else None
         if persist and self.pk:
-            if self.score != score_str or self.winner_id != winner_id:
+            changed = (self.score != score_str) or (self.winner_id != winner_id)
+            if changed:
                 type(self).objects.filter(pk=self.pk).update(
                     score=score_str,
                     winner_id=winner_id,
                 )
             self.score = score_str
             self.winner_id = winner_id
-
-        return score_str, winner_obj
+        return score_str, winner_team
 
     def clean(self):
         errors = {}
@@ -649,7 +643,7 @@ class Game(TimeStampedModel, UserStampedModel):
             self.winner = self.series.team1
         elif self.result_type == GameResultType.FORFEIT_TEAM2:
             self.winner = self.series.team2
-        elif self.result_type == GameResultType.NO_CONTEST:
+        elif self.result_type == GameResultType.DRAW:
             self.winner = None
 
         self.full_clean()
