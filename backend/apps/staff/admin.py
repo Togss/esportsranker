@@ -42,6 +42,8 @@ class StaffAdmin(admin.ModelAdmin):
         'created_at',
         'updated_at',
         'photo_preview',
+        'created_by',
+        'updated_by',
     )
     prepopulated_fields = {'slug': ('handle',)}
     ordering = ('handle',)
@@ -76,14 +78,22 @@ class StaffAdmin(admin.ModelAdmin):
                 'youtube',
             )
         }),
-        ('Timestamps', {
+        ('Audit Info', {
             'classes': ('collapse',),
             'fields': (
                 'created_at',
                 'updated_at',
+                'created_by',
+                'updated_by',
             )
         }),
     )
+
+    def save_model(self, request, obj, form, change):
+        if not change or not obj.created_by:
+            obj.created_by = request.user
+        obj.updated_by = request.user
+        super().save_model(request, obj, form, change)
     
     def get_search_results(self, request, queryset, search_term):
         """

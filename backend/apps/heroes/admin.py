@@ -18,7 +18,9 @@ class HeroAdmin(admin.ModelAdmin):
     readonly_fields = (
         'created_at',
         'updated_at',
-        'icon_preview'
+        'icon_preview',
+        'created_by',
+        'updated_by'
     )
     prepopulated_fields = {'slug': ('name',)}
     ordering = (
@@ -36,11 +38,17 @@ class HeroAdmin(admin.ModelAdmin):
                 'secondary_class'
             )
         }),
-        ('Timestamps', {
-            'fields': ('created_at', 'updated_at')
+        ('Audit Info', {
+            'fields': ('created_at', 'updated_at', 'created_by', 'updated_by')
         }),
     )
     list_display_links = ('icon_thumb', 'name',)
+
+    def save_model(self, request, obj, form, change):
+        if not change or not obj.created_by:
+            obj.created_by = request.user
+        obj.updated_by = request.user
+        return super().save_model(request, obj, form, change)
 
     @admin.display(description='Hero Icon')
     def icon_thumb(self, obj: Hero):

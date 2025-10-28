@@ -36,7 +36,7 @@ class TeamAdmin(admin.ModelAdmin):
     )
     list_filter = ('region', 'is_active')
     search_fields = ('short_name', 'name', 'region', 'slug')
-    readonly_fields = ('logo_preview', 'created_at', 'updated_at')
+    readonly_fields = ('logo_preview', 'created_at', 'updated_at', 'created_by', 'updated_by')
     prepopulated_fields = {'slug': ('name',)}
     ordering = ('-founded_year', 'name')
     fieldsets = (
@@ -66,14 +66,20 @@ class TeamAdmin(admin.ModelAdmin):
             }
         ),
         (
-            'Timestamps',
+            'Audit Info',
             {
                 'classes': ('collapse',),
-                'fields': ('created_at', 'updated_at')
+                'fields': ('created_at', 'updated_at', 'created_by', 'updated_by')
             }
         )
     )
     inlines = [StaffMembershipInline, TeamMembershipInline]
+
+    def save_model(self, request, obj, form, change):
+        if not change and not obj.created_by:
+            obj.created_by = request.user
+        obj.updated_by = request.user
+        super().save_model(request, obj, form, change)
 
     @admin.display(description='Current Players')
     def current_players_count(self, obj: Team):

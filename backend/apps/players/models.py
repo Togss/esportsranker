@@ -1,6 +1,4 @@
 from django.db import models
-from django.core.validators import MinValueValidator, MaxValueValidator, MinLengthValidator, RegexValidator
-from django.core.exceptions import ValidationError
 from datetime import date
 
 from apps.common.enums import PlayerRole
@@ -9,7 +7,11 @@ from apps.common.validators import (
     validate_start_before_end,
     validate_membership_overlap
 )
-from apps.common.models import TimeStampedModel, SluggedModel
+from apps.common.models import (
+    TimeStampedModel,
+    SluggedModel,
+    UserStampedModel
+)
 from apps.teams.models import Team
 
 
@@ -20,7 +22,7 @@ def player_photo_upload_to(instance, filename: str) -> str:
 #--------------------------------------------------------------------
 # Player Model and PlayerMembership Model
 #--------------------------------------------------------------------
-class Player(TimeStampedModel, SluggedModel ):
+class Player(TimeStampedModel, SluggedModel, UserStampedModel):
     ign = models.CharField(
         max_length=30,
         unique=True,
@@ -86,7 +88,7 @@ class Player(TimeStampedModel, SluggedModel ):
             years -= 1
         return years
 
-class PlayerMembership(TimeStampedModel):
+class PlayerMembership(TimeStampedModel, UserStampedModel):
     player = models.ForeignKey(
         'players.Player',
         on_delete=models.CASCADE,

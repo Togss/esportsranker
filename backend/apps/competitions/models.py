@@ -7,7 +7,7 @@ from django.utils import timezone
 from django.core.exceptions import ValidationError
 from django.apps import apps
 
-from apps.common.models import TimeStampedModel, SluggedModel
+from apps.common.models import TimeStampedModel, SluggedModel, UserStampedModel
 from apps.common.enums import (
     Region,                # from teams/players week2 work
     TournamentTier,
@@ -36,7 +36,7 @@ def tournament_logo_upload_to(instance, filename: str) -> str:
     return f"tournament/logos/{instance.slug}.{ext}"
 
 
-class Tournament(SluggedModel, TimeStampedModel):
+class Tournament(SluggedModel, TimeStampedModel, UserStampedModel):
     """
     Core tournament entity (M-Series, MPL PH S13, MSC 2024, etc.)
     """
@@ -215,7 +215,7 @@ class TournamentTeam(models.Model):
         return f"{team_name} ({self.tournament.name})"
 
 
-class Stage(TimeStampedModel):
+class Stage(TimeStampedModel, UserStampedModel):
     """
     Subdivision of a Tournament.
     e.g. "Group Stage", "Playoffs - Upper Bracket", "Grand Finals"
@@ -370,7 +370,7 @@ class Stage(TimeStampedModel):
         super().save(*args, **kwargs)
 
 
-class Series(TimeStampedModel):
+class Series(TimeStampedModel, UserStampedModel):
     """
     Head-to-head matchup between two teams in a Stage.
     """
@@ -531,7 +531,7 @@ class Series(TimeStampedModel):
         super().save(*args, **kwargs)
 
 
-class Game(TimeStampedModel):
+class Game(TimeStampedModel, UserStampedModel):
     series = models.ForeignKey(Series, related_name='games', on_delete=models.CASCADE)
 
     game_no = models.PositiveIntegerField(
@@ -671,7 +671,7 @@ class Game(TimeStampedModel):
             transaction.on_commit(_ensure_team_stats)
 
 
-class TeamGameStat(TimeStampedModel):
+class TeamGameStat(TimeStampedModel, UserStampedModel):
     VICTORY = 'VICTORY'
     DEFEAT = 'DEFEAT'
 
@@ -768,7 +768,7 @@ class TeamGameStat(TimeStampedModel):
 
 from apps.common.enums import PlayerRole  # reuse player role enum for per-game stats
 
-class PlayerGameStat(TimeStampedModel):
+class PlayerGameStat(TimeStampedModel, UserStampedModel):
     game = models.ForeignKey(Game, related_name='player_stats', on_delete=models.CASCADE)
     team_stat = models.ForeignKey(TeamGameStat, related_name='player_stats', on_delete=models.CASCADE)
     player = models.ForeignKey('players.Player', related_name='game_stats', on_delete=models.CASCADE)
@@ -886,7 +886,7 @@ class PlayerGameStat(TimeStampedModel):
         return val.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
 
-class GameDraftAction(TimeStampedModel):
+class GameDraftAction(TimeStampedModel, UserStampedModel):
     game = models.ForeignKey(Game, related_name='draft_actions', on_delete=models.CASCADE)
 
     action = models.CharField(
