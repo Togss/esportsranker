@@ -15,40 +15,8 @@ from apps.competitions.models import (
     TeamGameStat, PlayerGameStat, GameDraftAction, TournamentTeam
 )
 from apps.teams.models import Team
-from apps.accounts.models import UserRole
+from apps.common.admin import RoleProtectedAdmin
 
-# UserRoleAdmin
-class RoleRestrictedAdmin(admin.ModelAdmin):
-    def has_module_permission(selff, request):
-        if not request.user.is_authenticated:
-            return False
-        if not request.user.is_staff:
-            return False
-        return True
-    
-    def has_view_permission(self, request, obj=None):
-        if not request.user.is_authenticated or not request.user.is_staff:
-            return False
-        return True
-
-    def has_add_permission(self, request):
-        if not request.user.is_authenticated or not request.user.is_staff:
-            return False
-        return request.user.role in {UserRole.ADMIN, UserRole.MODERATOR}
-    
-    def has_change_permission(self, request, obj=None):
-        if not request.user.is_authenticated or not request.user.is_staff:
-            return False
-        return request.user.role in {UserRole.ADMIN}
-
-    def has_delete_permission(self, request, obj=None):
-        if not request.user.is_authenticated or not request.user.is_staff:
-            return False
-        return request.user.role in {UserRole.ADMIN}
-    
-    def get_queryset(self, request):
-        qs = super().get_queryset(request)
-        return qs
 
 # ---------- Inlines ----------
 class SeriesInline(admin.TabularInline):
@@ -251,7 +219,7 @@ class TournamentTeamInline(admin.TabularInline):
 # ---------- Admins ----------
 
 @admin.register(Tournament)
-class TournamentAdmin(RoleRestrictedAdmin):
+class TournamentAdmin(RoleProtectedAdmin):
     list_display = (
         "logo_thumb",
         "name",
@@ -369,7 +337,7 @@ class TournamentAdmin(RoleRestrictedAdmin):
     
 # ----- Stage Admin -----
 @admin.register(Stage)
-class StageAdmin(RoleRestrictedAdmin):
+class StageAdmin(RoleProtectedAdmin):
     # What you see in the /admin/competitions/stage/ list view
     list_display = (
         "stage_label",      # e.g. "Playoffs Stage - Upper Bracket"
@@ -507,7 +475,7 @@ class SeriesAdminForm(forms.ModelForm):
 
 
 @admin.register(Series)
-class SeriesAdmin(RoleRestrictedAdmin):
+class SeriesAdmin(RoleProtectedAdmin):
     form = SeriesAdminForm
     list_display = ("series_matchup", "stage", "score", "winner", "best_of", "scheduled_date")
     list_filter = ("tournament", "stage", "best_of")
@@ -618,7 +586,7 @@ class GameAdminForm(forms.ModelForm):
         return super().save(commit=commit)
     
 @admin.register(Game)
-class GameAdmin(RoleRestrictedAdmin):
+class GameAdmin(RoleProtectedAdmin):
     form = GameAdminForm
     list_display = (
         "series", "game_no",
@@ -714,7 +682,7 @@ def _readonly_fields_for(model):
     return [f.name for f in model._meta.fields] + [m.name for m in model._meta.many_to_many]
 
 @admin.register(TeamGameStat)
-class TeamGameStatReadonlyAdmin(RoleRestrictedAdmin):
+class TeamGameStatReadonlyAdmin(RoleProtectedAdmin):
     list_display = ('game', 'team', 'side', 'game_result', 'gold', 't_score',
                     'tower_destroyed', 'lord_kills', 'turtle_kills',
                     'orange_buff', 'purple_buff')
@@ -729,7 +697,7 @@ class TeamGameStatReadonlyAdmin(RoleRestrictedAdmin):
         return _readonly_fields_for(TeamGameStat)
 
 @admin.register(PlayerGameStat)
-class PlayerGameStatReadonlyAdmin(RoleRestrictedAdmin):
+class PlayerGameStatReadonlyAdmin(RoleProtectedAdmin):
     list_display = ('game', 'team', 'player', 'role', 'hero', 'k', 'd', 'a',
                     'gold', 'dmg_dealt', 'dmg_taken', 'is_MVP')
     list_filter = ('role', 'team', 'game__series__tournament', 'game__series')
@@ -743,7 +711,7 @@ class PlayerGameStatReadonlyAdmin(RoleRestrictedAdmin):
         return _readonly_fields_for(PlayerGameStat)
 
 @admin.register(GameDraftAction)
-class GameDraftActionReadonlyAdmin(RoleRestrictedAdmin):
+class GameDraftActionReadonlyAdmin(RoleProtectedAdmin):
     list_display = ('game', 'order', 'action', 'side', 'hero', 'player')
     list_filter = ('action', 'side', 'game__series__tournament', 'game__series')
     search_fields = ('hero__name', 'player__name', 'game__series__tournament__name')
