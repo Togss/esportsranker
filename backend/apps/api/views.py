@@ -34,6 +34,11 @@ from apps.staff import selectors as staff_selectors
 from apps.heroes import selectors as hero_selectors
 from apps.heroes.models import Hero
 from apps.heroes.serializers import HeroSerializer
+from apps.api.permissions import (
+    IsAdminOrReadOnly,
+    CanEditMatches,
+    IsAdminOnly
+)
 
 
 class TeamViewSet(viewsets.ReadOnlyModelViewSet):
@@ -45,6 +50,7 @@ class TeamViewSet(viewsets.ReadOnlyModelViewSet):
     """
     queryset = Team.objects.filter(is_active=True).order_by("short_name")
     serializer_class = TeamSerializer
+    permission_classes = [IsAdminOrReadOnly]
 
     # Enable filters, ordering, and search
     filter_backends = [
@@ -92,6 +98,7 @@ class PlayerViewSet(viewsets.ReadOnlyModelViewSet):
     """
     queryset = Player.objects.filter(is_active=True).select_related().prefetch_related("memberships__team")
     serializer_class = PlayerSerializer
+    permission_classes = [IsAdminOrReadOnly]
 
     # Enable filters, ordering, and search
     filter_backends = [
@@ -170,6 +177,7 @@ class HeroViewSet(viewsets.ReadOnlyModelViewSet):
     """
     queryset = Hero.objects.all().order_by("name")
     serializer_class = HeroSerializer
+    permission_classes = [IsAdminOrReadOnly]
 
     # Enable filters, ordering, and search
     filter_backends = [
@@ -210,6 +218,7 @@ class StaffViewSet(viewsets.ReadOnlyModelViewSet):
     """
     queryset = Staff.objects.filter(is_active=True).select_related().prefetch_related("memberships__team")
     serializer_class = StaffSerializer
+    permission_classes = [IsAdminOrReadOnly]
 
     # Enable filters, ordering, and search
     filter_backends = [
@@ -263,6 +272,7 @@ class TournamentViewSet(viewsets.ReadOnlyModelViewSet):
         .order_by("-start_date")
     )
     serializer_class = TournamentSerializer
+    permission_classes = [IsAdminOrReadOnly]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter, filters.SearchFilter]
     filterset_fields = ["region", "tier", "status"]
     ordering_fields = ["start_date", "end_date", "tier"]
@@ -288,6 +298,7 @@ class TournamentViewSet(viewsets.ReadOnlyModelViewSet):
 class StageViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Stage.objects.select_related("tournament").order_by("order")
     serializer_class = StageSerializer
+    permission_classes = [IsAdminOrReadOnly]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter, filters.SearchFilter]
     filterset_fields = ["tournament", "stage_type", "status"]
     ordering_fields = ["order", "start_date"]
@@ -297,6 +308,7 @@ class StageViewSet(viewsets.ReadOnlyModelViewSet):
 class SeriesViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Series.objects.select_related("tournament", "stage", "team1", "team2", "winner")
     serializer_class = SeriesSerializer
+    permission_classes = [CanEditMatches]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter, filters.SearchFilter]
     filterset_fields = ["tournament", "stage", "winner"]
     ordering_fields = ["scheduled_date"]
@@ -306,6 +318,7 @@ class SeriesViewSet(viewsets.ReadOnlyModelViewSet):
 class GameViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Game.objects.select_related("series", "blue_side", "red_side", "winner")
     serializer_class = GameSerializer
+    permission_classes = [CanEditMatches]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ["series", "winner"]
     ordering_fields = ["game_no", "duration"]
@@ -314,6 +327,7 @@ class GameViewSet(viewsets.ReadOnlyModelViewSet):
 class TeamGameStatViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = TeamGameStat.objects.select_related("game", "team")
     serializer_class = TeamGameStatSerializer
+    permission_classes = [CanEditMatches]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ["team", "game__series", "side"]
     ordering_fields = ["gold", "score"]
@@ -322,6 +336,7 @@ class TeamGameStatViewSet(viewsets.ReadOnlyModelViewSet):
 class PlayerGameStatViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = PlayerGameStat.objects.select_related("game", "player", "team", "hero")
     serializer_class = PlayerGameStatSerializer
+    permission_classes = [CanEditMatches]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ["player", "team", "hero", "role", "is_MVP"]
     ordering_fields = ["k", "d", "a", "gold", "dmg_dealt", "dmg_taken"]
@@ -330,6 +345,7 @@ class PlayerGameStatViewSet(viewsets.ReadOnlyModelViewSet):
 class GameDraftActionViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = GameDraftAction.objects.select_related("game", "hero", "team", "player")
     serializer_class = GameDraftActionSerializer
+    permission_classes = [CanEditMatches]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ["game", "side", "action"]
     ordering_fields = ["order"]

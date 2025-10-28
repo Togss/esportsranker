@@ -145,7 +145,8 @@ SIMPLE_JWT = {
 
 SPECTACULAR_SETTINGS = {
     'TITLE': 'Esports Ranker API',
-    'DESCRIPTION': 'Public and Staff APIs for Esports Ranker',
+    'DESCRIPTION': 'Internal API for tournaments, matches, stats, and role-restricted operations.',
+    'SERVE_INCLUDE_SCHEMA': False,
     'VERSION': '1.0.0',
     'SWAGGER_UI_SETTINGS': {
         'persistAuthorization': True,
@@ -153,9 +154,23 @@ SPECTACULAR_SETTINGS = {
     'SECURITY': [
         {
             'BearerAuth': [],
+            'cookieAuth': [],
         }
     ],
-
+    'SECURITY_SCHEMES': {
+        'BearerAuth': {
+            'type': 'http',
+            'scheme': 'bearer',
+            'bearerFormat': 'JWT',
+            'description': 'Use the access token from /api/v1/auth/token/ as: `Bearer &lt;token&gt;`',
+        },
+        'cookieAuth': {
+            'type': 'apiKey',
+            'in': 'cookie',
+            'name': 'sessionid',
+            'description': 'Django session cookie from admin login (browser use only).',
+        }
+    },
     'COMPONENTS': {
         'securitySchemes': {
             'BearerAuth': {
@@ -167,4 +182,7 @@ SPECTACULAR_SETTINGS = {
     },
     'SERVE_INCLUDE_SCHEMA': False,
     'COMPONENT_SPLIT_REQUEST': True,
+    'COMPONENT_NON_READ_ONLY_REQUIRED': True,
+    'AUTHENTICATION_WHITELIST': [
+    ], 
 }
