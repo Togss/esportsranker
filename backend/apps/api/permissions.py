@@ -2,52 +2,57 @@ from rest_framework.permissions import BasePermission, SAFE_METHODS
 from apps.accounts.models import UserRole
 
 
-class IsAdminOrReadOnly(BasePermission):
+class PublicRead_AdminWriteOnly(BasePermission):
     """
-    - Anyone authenticated can READ (GET, HEAD, OPTIONS).
-    - Only Admins can WRITE (POST, PUT, PATCH, DELETE).
-    Use this for high-trust objects like Tournament, Team, Player, Staff.
+    SAFE (GET/HEAD/OPTIONS):
+        - allowed to ANYONE (public)
+    UNSAFE (POST/PUT/PATCH/DELETE):
+        - only allowed to Admin
     """
-
     def has_permission(self, request, view):
-        # Read-only methods are always fine for logged-in users
-        if request.method in SAFE_METHODS:
-            return request.user and request.user.is_authenticated
+        method = request.method.upper()
 
-        # Write methods require ADMIN role
-        return (
-            request.user
-            and request.user.is_authenticated
-            and getattr(request.user, "role", None) == UserRole.ADMIN
-        )
+        if method in SAFE_METHODS:
+            return True
+
+        if not request.user or not request.user.is_authenticated:
+            return False
+
+        role = getattr(request.user, "role", None)
+        return role == UserRole.ADMIN
 
 
-class CanEditMatches(BasePermission):
+class PublicRead_AdminOrModeratorWrite_NoDelete(BasePermission):
     """
-    - Anyone authenticated can READ.
-    - Admin OR Moderator can WRITE match-related data
-      (Games, Series, TeamGameStat, PlayerGameStat, etc.)
+    SAFE (GET/HEAD/OPTIONS):
+        - allowed to ANYONE (public)
+    POST/PUT/PATCH:
+        - allowed to Admin and Moderator
+    DELETE:
+        - allowed to Admin only
     """
-
     def has_permission(self, request, view):
-        if request.method in SAFE_METHODS:
-            return request.user and request.user.is_authenticated
+        method = request.method.upper()
 
-        user_role = getattr(request.user, "role", None)
-        return (
-            request.user
-            and request.user.is_authenticated
-            and user_role in [UserRole.ADMIN, UserRole.MODERATOR]
-        )
+        if method in SAFE_METHODS:
+            return True
+
+        if not request.user or not request.user.is_authenticated:
+            return False
+
+        role = getattr(request.user, "role", None)
+
+        if method == "DELETE":
+            return role == UserRole.ADMIN
+
+        if method in ["POST", "PUT", "PATCH"]:
+            return role in [UserRole.ADMIN, UserRole.MODERATOR]
+
+        return False
 
 
 class IsAdminOnly(BasePermission):
-    """
-    Full lock: only Admins can do anything, including read.
-    You probably won't use this today, but it's handy for
-    future maintenance endpoints, internal sync endpoints, etc.
-    """
-
+    """Only Admin can do anything (even read)."""
     def has_permission(self, request, view):
         return (
             request.user

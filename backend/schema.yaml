@@ -1,0 +1,2464 @@
+openapi: 3.0.3
+info:
+  title: Esports Ranker API
+  version: 1.0.0
+  description: Internal API for tournaments, matches, stats, and role-restricted operations.
+paths:
+  /api/auth/refresh/:
+    post:
+      operationId: api_auth_refresh_create
+      description: |-
+        Takes a refresh type JSON web token and returns an access type JSON web
+        token if the refresh token is valid.
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenRefreshRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TokenRefreshRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TokenRefreshRequest'
+        required: true
+      security:
+      - BearerAuth: []
+        cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenRefresh'
+          description: ''
+  /api/auth/token/:
+    post:
+      operationId: api_auth_token_create
+      description: |-
+        Takes a set of user credentials and returns an access and refresh JSON web
+        token pair to prove the authentication of those credentials.
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenObtainPairRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TokenObtainPairRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TokenObtainPairRequest'
+        required: true
+      security:
+      - BearerAuth: []
+        cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenObtainPair'
+          description: ''
+  /api/schema.yaml:
+    get:
+      operationId: api_schema.yaml_retrieve
+      description: |-
+        Return the same OpenAPI schema as /api/schema/,
+        but rendered as YAML for freeze-tagging in git.
+      tags:
+      - api
+      security:
+      - BearerAuth: []
+        cookieAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/v1/auth/token/:
+    post:
+      operationId: api_v1_auth_token_create
+      description: |-
+        Takes a set of user credentials and returns an access and refresh JSON web
+        token pair to prove the authentication of those credentials.
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EsportsTokenObtainPairRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/EsportsTokenObtainPairRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/EsportsTokenObtainPairRequest'
+        required: true
+      security:
+      - BearerAuth: []
+        cookieAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/auth/token/refresh/:
+    post:
+      operationId: api_v1_auth_token_refresh_create
+      description: |-
+        Takes a refresh type JSON web token and returns an access type JSON web
+        token if the refresh token is valid.
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenRefreshRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TokenRefreshRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TokenRefreshRequest'
+        required: true
+      security:
+      - BearerAuth: []
+        cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenRefresh'
+          description: ''
+  /api/v1/auth/token/verify/:
+    post:
+      operationId: api_v1_auth_token_verify_create
+      description: |-
+        Takes a token and indicates if it is valid.  This view provides no
+        information about a token's fitness for a particular use.
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenVerifyRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TokenVerifyRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TokenVerifyRequest'
+        required: true
+      security:
+      - BearerAuth: []
+        cookieAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/auth/whoami/:
+    get:
+      operationId: whoami
+      description: Returns ID, username, role, and capability flags based on role.
+        Works with JWT or session auth.
+      summary: Get information about the currently authenticated user
+      tags:
+      - api
+      security:
+      - BearerAuth: []
+        cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+              examples:
+                AdminExample:
+                  value:
+                    id: 1
+                    username: togadmin
+                    email: togadmin@hayatefinance.com
+                    role: admin
+                    is_staff: true
+                    is_superuser: false
+                    permissions:
+                      can_edit_teams: true
+                      can_edit_staff: true
+                      can_edit_players: true
+                      can_edit_heroes: true
+                      can_edit_tournaments: true
+                      can_edit_stages: true
+                      can_edit_series: true
+                      can_edit_games: true
+                      can_view_admin: true
+                  summary: Admin example
+          description: Current user data and permissions
+  /api/v1/game-draft-actions/:
+    get:
+      operationId: api_v1_game_draft_actions_list
+      parameters:
+      - in: query
+        name: action
+        schema:
+          type: string
+          enum:
+          - BAN
+          - PICK
+        description: |-
+          * `BAN` - Ban
+          * `PICK` - Pick
+      - in: query
+        name: game
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - in: query
+        name: side
+        schema:
+          type: string
+          enum:
+          - BLUE
+          - RED
+        description: |-
+          * `BLUE` - Blue Side
+          * `RED` - Red Side
+      tags:
+      - api
+      security:
+      - BearerAuth: []
+        cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedGameDraftActionList'
+          description: ''
+  /api/v1/game-draft-actions/{id}/:
+    get:
+      operationId: api_v1_game_draft_actions_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this Game Draft Action.
+        required: true
+      tags:
+      - api
+      security:
+      - BearerAuth: []
+        cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GameDraftAction'
+          description: ''
+  /api/v1/games/:
+    get:
+      operationId: api_v1_games_list
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - in: query
+        name: series
+        schema:
+          type: integer
+      - in: query
+        name: winner
+        schema:
+          type: integer
+      tags:
+      - api
+      security:
+      - BearerAuth: []
+        cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedGameList'
+          description: ''
+  /api/v1/games/{id}/:
+    get:
+      operationId: api_v1_games_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this Game.
+        required: true
+      tags:
+      - api
+      security:
+      - BearerAuth: []
+        cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Game'
+          description: ''
+  /api/v1/heroes/:
+    get:
+      operationId: api_v1_heroes_list
+      description: |-
+        Public read-only API for Heroes.
+        /api/v1/heroes/       → list of heroes
+        /api/v1/heroes/<id>/  → hero details
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - in: query
+        name: primary_class
+        schema:
+          type: string
+          enum:
+          - ASSASSIN
+          - FIGHTER
+          - MAGE
+          - MARKSMAN
+          - SUPPORT
+          - TANK
+        description: |-
+          * `TANK` - Tank
+          * `FIGHTER` - Fighter
+          * `ASSASSIN` - Assassin
+          * `MAGE` - Mage
+          * `MARKSMAN` - Marksman
+          * `SUPPORT` - Support
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: query
+        name: secondary_class
+        schema:
+          type: string
+          nullable: true
+          enum:
+          - ASSASSIN
+          - FIGHTER
+          - MAGE
+          - MARKSMAN
+          - SUPPORT
+          - TANK
+        description: |-
+          * `TANK` - Tank
+          * `FIGHTER` - Fighter
+          * `ASSASSIN` - Assassin
+          * `MAGE` - Mage
+          * `MARKSMAN` - Marksman
+          * `SUPPORT` - Support
+      tags:
+      - api
+      security:
+      - BearerAuth: []
+        cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedHeroList'
+          description: ''
+  /api/v1/heroes/{id}/:
+    get:
+      operationId: api_v1_heroes_retrieve
+      description: |-
+        Public read-only API for Heroes.
+        /api/v1/heroes/       → list of heroes
+        /api/v1/heroes/<id>/  → hero details
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this Hero.
+        required: true
+      tags:
+      - api
+      security:
+      - BearerAuth: []
+        cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Hero'
+          description: ''
+  /api/v1/player-game-stats/:
+    get:
+      operationId: api_v1_player_game_stats_list
+      parameters:
+      - in: query
+        name: hero
+        schema:
+          type: integer
+      - in: query
+        name: is_MVP
+        schema:
+          type: boolean
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - in: query
+        name: player
+        schema:
+          type: integer
+      - in: query
+        name: role
+        schema:
+          type: string
+          enum:
+          - EXP
+          - GOLD
+          - JUNGLE
+          - MID
+          - ROAM
+        description: |-
+          Role played in this match (Gold, Mid, Jungle, EXP, Roam)
+
+          * `GOLD` - Gold Lane
+          * `MID` - Mid Lane
+          * `JUNGLE` - Jungle
+          * `EXP` - Exp Lane
+          * `ROAM` - Roam
+      - in: query
+        name: team
+        schema:
+          type: integer
+      tags:
+      - api
+      security:
+      - BearerAuth: []
+        cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedPlayerGameStatList'
+          description: ''
+  /api/v1/player-game-stats/{id}/:
+    get:
+      operationId: api_v1_player_game_stats_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this Player Game Stat.
+        required: true
+      tags:
+      - api
+      security:
+      - BearerAuth: []
+        cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlayerGameStat'
+          description: ''
+  /api/v1/players/:
+    get:
+      operationId: api_v1_players_list
+      description: |-
+        Public read-only API for Players.
+        /api/v1/players/       → list active players
+        /api/v1/players/<id>/  → player details with memberships
+      parameters:
+      - in: query
+        name: is_active
+        schema:
+          type: boolean
+      - in: query
+        name: nationality
+        schema:
+          type: string
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - in: query
+        name: role
+        schema:
+          type: string
+          enum:
+          - EXP
+          - GOLD
+          - JUNGLE
+          - MID
+          - ROAM
+        description: |-
+          * `GOLD` - Gold Lane
+          * `MID` - Mid Lane
+          * `JUNGLE` - Jungle
+          * `EXP` - Exp Lane
+          * `ROAM` - Roam
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - api
+      security:
+      - BearerAuth: []
+        cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedPlayerList'
+          description: ''
+  /api/v1/players/{id}/:
+    get:
+      operationId: api_v1_players_retrieve
+      description: |-
+        Public read-only API for Players.
+        /api/v1/players/       → list active players
+        /api/v1/players/<id>/  → player details with memberships
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this player.
+        required: true
+      tags:
+      - api
+      security:
+      - BearerAuth: []
+        cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Player'
+          description: ''
+  /api/v1/series/:
+    get:
+      operationId: api_v1_series_list
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: query
+        name: stage
+        schema:
+          type: integer
+      - in: query
+        name: tournament
+        schema:
+          type: integer
+      - in: query
+        name: winner
+        schema:
+          type: integer
+      tags:
+      - api
+      security:
+      - BearerAuth: []
+        cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedSeriesList'
+          description: ''
+  /api/v1/series/{id}/:
+    get:
+      operationId: api_v1_series_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this Series.
+        required: true
+      tags:
+      - api
+      security:
+      - BearerAuth: []
+        cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Series'
+          description: ''
+  /api/v1/staff/:
+    get:
+      operationId: api_v1_staff_list
+      description: |-
+        Public read-only API for Staff.
+        /api/v1/staff/       → list active staff members
+        /api/v1/staff/<id>/  → staff member details with memberships
+      parameters:
+      - in: query
+        name: is_active
+        schema:
+          type: boolean
+      - in: query
+        name: nationality
+        schema:
+          type: string
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - in: query
+        name: primary_role
+        schema:
+          type: string
+          enum:
+          - ANALYST
+          - ASST_COACH
+          - HEAD_COACH
+          - MANAGER
+        description: |-
+          Main role overall (head coach, analyst, etc.)
+
+          * `HEAD_COACH` - Head Coach
+          * `ASST_COACH` - Assistant Coach
+          * `ANALYST` - Analyst
+          * `MANAGER` - Team Manager
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - api
+      security:
+      - BearerAuth: []
+        cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedStaffList'
+          description: ''
+  /api/v1/staff/{id}/:
+    get:
+      operationId: api_v1_staff_retrieve
+      description: |-
+        Public read-only API for Staff.
+        /api/v1/staff/       → list active staff members
+        /api/v1/staff/<id>/  → staff member details with memberships
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this staff.
+        required: true
+      tags:
+      - api
+      security:
+      - BearerAuth: []
+        cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Staff'
+          description: ''
+  /api/v1/stages/:
+    get:
+      operationId: api_v1_stages_list
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: query
+        name: stage_type
+        schema:
+          type: string
+          enum:
+          - FINALS
+          - GROUP
+          - KNOCKOUT
+          - PLAYOFFS
+          - REGULAR SEASON
+          - WILD CARD
+        description: |-
+          * `WILD CARD` - Wild card Stage
+          * `REGULAR SEASON` - Regular Season
+          * `KNOCKOUT` - Knockout Stage
+          * `GROUP` - Group Stage
+          * `PLAYOFFS` - Playoff Stage
+          * `FINALS` - Finals
+      - in: query
+        name: status
+        schema:
+          type: string
+          enum:
+          - COMPLETED
+          - ONGOING
+          - UPCOMING
+        description: |-
+          Auto-computed (Upcoming / Ongoing / Completed).
+
+          * `UPCOMING` - Upcoming
+          * `ONGOING` - Ongoing
+          * `COMPLETED` - Completed
+      - in: query
+        name: tournament
+        schema:
+          type: integer
+      tags:
+      - api
+      security:
+      - BearerAuth: []
+        cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedStageList'
+          description: ''
+  /api/v1/stages/{id}/:
+    get:
+      operationId: api_v1_stages_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this Stage.
+        required: true
+      tags:
+      - api
+      security:
+      - BearerAuth: []
+        cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Stage'
+          description: ''
+  /api/v1/team-game-stats/:
+    get:
+      operationId: api_v1_team_game_stats_list
+      parameters:
+      - in: query
+        name: game__series
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - in: query
+        name: side
+        schema:
+          type: string
+          enum:
+          - BLUE
+          - RED
+        description: |-
+          * `BLUE` - Blue Side
+          * `RED` - Red Side
+      - in: query
+        name: team
+        schema:
+          type: integer
+      tags:
+      - api
+      security:
+      - BearerAuth: []
+        cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedTeamGameStatList'
+          description: ''
+  /api/v1/team-game-stats/{id}/:
+    get:
+      operationId: api_v1_team_game_stats_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this Team Game Stat.
+        required: true
+      tags:
+      - api
+      security:
+      - BearerAuth: []
+        cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamGameStat'
+          description: ''
+  /api/v1/teams/:
+    get:
+      operationId: api_v1_teams_list
+      description: |-
+        Public read-only API for Teams.
+        Endpoints:
+            /api/v1/teams/          → list of active teams
+            /api/v1/teams/<id>/     → detailed view of a specific team
+      parameters:
+      - in: query
+        name: founded_year
+        schema:
+          type: integer
+      - in: query
+        name: is_active
+        schema:
+          type: boolean
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - in: query
+        name: region
+        schema:
+          type: string
+          enum:
+          - BR
+          - CN
+          - EU
+          - HK
+          - ID
+          - IN
+          - INTL
+          - JP
+          - KR
+          - LATAM
+          - MENA
+          - MM
+          - MY
+          - NA
+          - PH
+          - SG
+          - TH
+          - TR
+          - TW
+          - VN
+        description: |-
+          Select the region the team belongs to.
+
+          * `NA` - North America
+          * `ID` - Indonesia
+          * `MY` - Malaysia
+          * `PH` - Philippines
+          * `SG` - Singapore
+          * `BR` - Brazil
+          * `VN` - Vietnam
+          * `MM` - Myanmar
+          * `TH` - Thailand
+          * `IN` - India
+          * `TR` - Turkey
+          * `EU` - Europe
+          * `JP` - Japan
+          * `CN` - China
+          * `MENA` - Middle East and North Africa
+          * `KR` - Korea
+          * `TW` - Taiwan
+          * `HK` - Hong Kong
+          * `LATAM` - Latin America
+          * `INTL` - International
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - api
+      security:
+      - BearerAuth: []
+        cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedTeamList'
+          description: ''
+  /api/v1/teams/{id}/:
+    get:
+      operationId: api_v1_teams_retrieve
+      description: |-
+        Public read-only API for Teams.
+        Endpoints:
+            /api/v1/teams/          → list of active teams
+            /api/v1/teams/<id>/     → detailed view of a specific team
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this team.
+        required: true
+      tags:
+      - api
+      security:
+      - BearerAuth: []
+        cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Team'
+          description: ''
+  /api/v1/tournaments/:
+    get:
+      operationId: api_v1_tournaments_list
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - in: query
+        name: region
+        schema:
+          type: string
+          enum:
+          - BR
+          - CN
+          - EU
+          - HK
+          - ID
+          - IN
+          - INTL
+          - JP
+          - KR
+          - LATAM
+          - MENA
+          - MM
+          - MY
+          - NA
+          - PH
+          - SG
+          - TH
+          - TR
+          - TW
+          - VN
+        description: |-
+          Primary region or league this tournament belongs to (e.g. PH, ID, INTL).
+
+          * `NA` - North America
+          * `ID` - Indonesia
+          * `MY` - Malaysia
+          * `PH` - Philippines
+          * `SG` - Singapore
+          * `BR` - Brazil
+          * `VN` - Vietnam
+          * `MM` - Myanmar
+          * `TH` - Thailand
+          * `IN` - India
+          * `TR` - Turkey
+          * `EU` - Europe
+          * `JP` - Japan
+          * `CN` - China
+          * `MENA` - Middle East and North Africa
+          * `KR` - Korea
+          * `TW` - Taiwan
+          * `HK` - Hong Kong
+          * `LATAM` - Latin America
+          * `INTL` - International
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: query
+        name: status
+        schema:
+          type: string
+          enum:
+          - COMPLETED
+          - ONGOING
+          - UPCOMING
+        description: |-
+          * `UPCOMING` - Upcoming
+          * `ONGOING` - Ongoing
+          * `COMPLETED` - Completed
+      - in: query
+        name: tier
+        schema:
+          type: string
+          enum:
+          - A
+          - B
+          - C
+          - D
+          - S
+          - SS
+        description: |-
+          S-tier (world), A-tier (continental), B-tier (franchise league), etc.
+
+          * `SS` - SS-tier
+          * `S` - S-tier
+          * `A` - A-tier
+          * `B` - B-tier
+          * `C` - C-tier
+          * `D` - D-tier
+      tags:
+      - api
+      security:
+      - BearerAuth: []
+        cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Tournament'
+          description: ''
+  /api/v1/tournaments/{id}/:
+    get:
+      operationId: api_v1_tournaments_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this Tournament.
+        required: true
+      tags:
+      - api
+      security:
+      - BearerAuth: []
+        cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tournament'
+          description: ''
+  /ingest/game-result/:
+    post:
+      operationId: ingest_game_result_create
+      description: |-
+        POST /ingest/game-result/
+        Intended to report final game info (sides, winner, result_type, duration).
+
+        Same idea: shape is in place, write is not enabled yet.
+      tags:
+      - ingest
+      security:
+      - BearerAuth: []
+        cookieAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /ingest/series/:
+    post:
+      operationId: ingest_series_create
+      description: |-
+        POST /ingest/series/
+        Intended for the desktop moderator app to submit a new Series.
+
+        Current state (Week 1 Day 6):
+        - We accept payload structure
+        - We DON'T write to DB yet (no auth layer yet)
+      tags:
+      - ingest
+      security:
+      - BearerAuth: []
+        cookieAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+components:
+  schemas:
+    ActionEnum:
+      enum:
+      - BAN
+      - PICK
+      type: string
+      description: |-
+        * `BAN` - Ban
+        * `PICK` - Pick
+    BestOfEnum:
+      enum:
+      - 1
+      - 3
+      - 5
+      - 7
+      type: integer
+      description: |-
+        * `1` - Best of 1
+        * `3` - Best of 3
+        * `5` - Best of 5
+        * `7` - Best of 7
+    BlankEnum:
+      enum:
+      - ''
+    EsportsTokenObtainPairRequest:
+      type: object
+      description: Override the default serializer so we can attach user info in the
+        response.
+      properties:
+        username:
+          type: string
+          writeOnly: true
+          minLength: 1
+        password:
+          type: string
+          writeOnly: true
+          minLength: 1
+      required:
+      - password
+      - username
+    Game:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        game_no:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          description: Game number in the series, e.g., 1 for Game 1
+        blue_side:
+          type: string
+          readOnly: true
+        red_side:
+          type: string
+          readOnly: true
+        winner_name:
+          type: string
+          readOnly: true
+        duration:
+          type: string
+          nullable: true
+          description: Duration of the game
+        result_type:
+          $ref: '#/components/schemas/ResultTypeEnum'
+        vod_link:
+          type: string
+          format: uri
+          description: Link to the VOD of the game
+          maxLength: 200
+        team_stats:
+          type: array
+          items:
+            $ref: '#/components/schemas/TeamGameStat'
+          readOnly: true
+        player_stats:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlayerGameStat'
+          readOnly: true
+        draft_actions:
+          type: array
+          items:
+            $ref: '#/components/schemas/GameDraftAction'
+          readOnly: true
+      required:
+      - blue_side
+      - draft_actions
+      - game_no
+      - id
+      - player_stats
+      - red_side
+      - team_stats
+      - winner_name
+    GameDraftAction:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        action:
+          $ref: '#/components/schemas/ActionEnum'
+        side:
+          $ref: '#/components/schemas/SideEnum'
+        order:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          description: Order of the action in the draft, e.g., 1 for first action
+        hero_name:
+          type: string
+          readOnly: true
+        team_name:
+          type: string
+          readOnly: true
+        player_name:
+          type: string
+          readOnly: true
+      required:
+      - action
+      - hero_name
+      - id
+      - order
+      - player_name
+      - side
+      - team_name
+    GameResultEnum:
+      enum:
+      - VICTORY
+      - DEFEAT
+      type: string
+      description: |-
+        * `VICTORY` - Win
+        * `DEFEAT` - Loss
+    Hero:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          readOnly: true
+        slug:
+          type: string
+          readOnly: true
+          pattern: ^[-a-zA-Z0-9_]+$
+        primary_class:
+          allOf:
+          - $ref: '#/components/schemas/PrimaryClassEnum'
+          readOnly: true
+        secondary_class:
+          readOnly: true
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/SecondaryClassEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        classes:
+          type: string
+          readOnly: true
+        hero_icon_url:
+          type: string
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - classes
+      - created_at
+      - hero_icon_url
+      - id
+      - name
+      - primary_class
+      - secondary_class
+      - slug
+      - updated_at
+    NullEnum:
+      enum:
+      - null
+    PaginatedGameDraftActionList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/GameDraftAction'
+    PaginatedGameList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Game'
+    PaginatedHeroList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Hero'
+    PaginatedPlayerGameStatList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlayerGameStat'
+    PaginatedPlayerList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Player'
+    PaginatedSeriesList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Series'
+    PaginatedStaffList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Staff'
+    PaginatedStageList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Stage'
+    PaginatedTeamGameStatList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/TeamGameStat'
+    PaginatedTeamList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Team'
+    Player:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 255
+        slug:
+          type: string
+          maxLength: 255
+          pattern: ^[-a-zA-Z0-9_]+$
+        ign:
+          type: string
+          description: In-Game Name (IGN) of the player
+          maxLength: 30
+        photo:
+          type: string
+          readOnly: true
+        role:
+          $ref: '#/components/schemas/RoleEnum'
+        age:
+          type: integer
+          readOnly: true
+        date_of_birth:
+          type: string
+          format: date
+          nullable: true
+        nationality:
+          type: string
+          readOnly: true
+        achievements:
+          type: string
+        x:
+          type: string
+          format: uri
+          description: Link to player's X (formerly Twitter) profile
+          maxLength: 200
+        facebook:
+          type: string
+          format: uri
+          description: Link to player's Facebook profile
+          maxLength: 200
+        instagram:
+          type: string
+          format: uri
+          description: Link to player's Instagram profile
+          maxLength: 200
+        youtube:
+          type: string
+          format: uri
+          description: Link to player's YouTube channel
+          maxLength: 200
+        is_active:
+          type: boolean
+          description: Indicates if the player is currently active
+        memberships:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlayerMembership'
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - age
+      - created_at
+      - id
+      - ign
+      - memberships
+      - name
+      - nationality
+      - photo
+      - role
+      - updated_at
+    PlayerGameStat:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        player_name:
+          type: string
+          readOnly: true
+        team_name:
+          type: string
+          readOnly: true
+        hero_name:
+          type: string
+          readOnly: true
+        role:
+          allOf:
+          - $ref: '#/components/schemas/RoleEnum'
+          description: |-
+            Role played in this match (Gold, Mid, Jungle, EXP, Roam)
+
+            * `GOLD` - Gold Lane
+            * `MID` - Mid Lane
+            * `JUNGLE` - Jungle
+            * `EXP` - Exp Lane
+            * `ROAM` - Roam
+        is_MVP:
+          type: boolean
+          description: Indicates if the player was the MVP of the game
+        k:
+          type: integer
+          maximum: 32767
+          minimum: 0
+          description: Kills
+        d:
+          type: integer
+          maximum: 32767
+          minimum: 0
+          description: Deaths
+        a:
+          type: integer
+          maximum: 32767
+          minimum: 0
+          description: Assists
+        gold:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          description: Total Gold Earned
+        dmg_dealt:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          description: Total Damage Dealt
+        dmg_taken:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          description: Total Damage Taken
+      required:
+      - hero_name
+      - id
+      - player_name
+      - role
+      - team_name
+    PlayerMembership:
+      type: object
+      properties:
+        team_name:
+          type: string
+          readOnly: true
+        role_at_team:
+          allOf:
+          - $ref: '#/components/schemas/RoleAtTeamBbfEnum'
+          description: |-
+            Player's primary role while at the team
+
+            * `GOLD` - Gold Lane
+            * `MID` - Mid Lane
+            * `JUNGLE` - Jungle
+            * `EXP` - Exp Lane
+            * `ROAM` - Roam
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+          nullable: true
+          description: Leave blank if currently active with the team
+        is_starter:
+          type: boolean
+          description: Indicates if the player was a starter during this membership
+        is_active_today:
+          type: string
+          readOnly: true
+      required:
+      - is_active_today
+      - role_at_team
+      - start_date
+      - team_name
+    PrimaryClassEnum:
+      enum:
+      - TANK
+      - FIGHTER
+      - ASSASSIN
+      - MAGE
+      - MARKSMAN
+      - SUPPORT
+      type: string
+      description: |-
+        * `TANK` - Tank
+        * `FIGHTER` - Fighter
+        * `ASSASSIN` - Assassin
+        * `MAGE` - Mage
+        * `MARKSMAN` - Marksman
+        * `SUPPORT` - Support
+    PrimaryRoleEnum:
+      enum:
+      - HEAD_COACH
+      - ASST_COACH
+      - ANALYST
+      - MANAGER
+      type: string
+      description: |-
+        * `HEAD_COACH` - Head Coach
+        * `ASST_COACH` - Assistant Coach
+        * `ANALYST` - Analyst
+        * `MANAGER` - Team Manager
+    RegionEnum:
+      enum:
+      - NA
+      - ID
+      - MY
+      - PH
+      - SG
+      - BR
+      - VN
+      - MM
+      - TH
+      - IN
+      - TR
+      - EU
+      - JP
+      - CN
+      - MENA
+      - KR
+      - TW
+      - HK
+      - LATAM
+      - INTL
+      type: string
+      description: |-
+        * `NA` - North America
+        * `ID` - Indonesia
+        * `MY` - Malaysia
+        * `PH` - Philippines
+        * `SG` - Singapore
+        * `BR` - Brazil
+        * `VN` - Vietnam
+        * `MM` - Myanmar
+        * `TH` - Thailand
+        * `IN` - India
+        * `TR` - Turkey
+        * `EU` - Europe
+        * `JP` - Japan
+        * `CN` - China
+        * `MENA` - Middle East and North Africa
+        * `KR` - Korea
+        * `TW` - Taiwan
+        * `HK` - Hong Kong
+        * `LATAM` - Latin America
+        * `INTL` - International
+    ResultTypeEnum:
+      enum:
+      - NORMAL
+      - FORFEIT_TEAM1
+      - FORFEIT_TEAM2
+      - DRAW
+      type: string
+      description: |-
+        * `NORMAL` - Normal Win
+        * `FORFEIT_TEAM1` - Forfeit Team 1
+        * `FORFEIT_TEAM2` - Forfeit Team 2
+        * `DRAW` - Draw
+    RoleAtTeamBbfEnum:
+      enum:
+      - GOLD
+      - MID
+      - JUNGLE
+      - EXP
+      - ROAM
+      type: string
+      description: |-
+        * `GOLD` - Gold Lane
+        * `MID` - Mid Lane
+        * `JUNGLE` - Jungle
+        * `EXP` - Exp Lane
+        * `ROAM` - Roam
+    RoleAtTeamFa4Enum:
+      enum:
+      - HEAD_COACH
+      - ASST_COACH
+      - ANALYST
+      - MANAGER
+      type: string
+      description: |-
+        * `HEAD_COACH` - Head Coach
+        * `ASST_COACH` - Assistant Coach
+        * `ANALYST` - Analyst
+        * `MANAGER` - Team Manager
+    RoleEnum:
+      enum:
+      - GOLD
+      - MID
+      - JUNGLE
+      - EXP
+      - ROAM
+      type: string
+      description: |-
+        * `GOLD` - Gold Lane
+        * `MID` - Mid Lane
+        * `JUNGLE` - Jungle
+        * `EXP` - Exp Lane
+        * `ROAM` - Roam
+    SecondaryClassEnum:
+      enum:
+      - TANK
+      - FIGHTER
+      - ASSASSIN
+      - MAGE
+      - MARKSMAN
+      - SUPPORT
+      type: string
+      description: |-
+        * `TANK` - Tank
+        * `FIGHTER` - Fighter
+        * `ASSASSIN` - Assassin
+        * `MAGE` - Mage
+        * `MARKSMAN` - Marksman
+        * `SUPPORT` - Support
+    Series:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        team1_name:
+          type: string
+          readOnly: true
+        team2_name:
+          type: string
+          readOnly: true
+        winner_name:
+          type: string
+          readOnly: true
+        best_of:
+          nullable: true
+          description: |-
+            Length of the series (Bo3, Bo5...).
+
+            * `1` - Best of 1
+            * `3` - Best of 3
+            * `5` - Best of 5
+            * `7` - Best of 7
+          minimum: 0
+          maximum: 2147483647
+          oneOf:
+          - $ref: '#/components/schemas/BestOfEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        scheduled_date:
+          type: string
+          format: date-time
+          description: Planned start (local time). Used for overdue data reminders.
+        score:
+          type: string
+          description: Score in format 'Team1Score-Team2Score', e.g. '2-1'.
+          maxLength: 20
+        games:
+          type: array
+          items:
+            $ref: '#/components/schemas/Game'
+          readOnly: true
+      required:
+      - games
+      - id
+      - scheduled_date
+      - team1_name
+      - team2_name
+      - winner_name
+    SideEnum:
+      enum:
+      - BLUE
+      - RED
+      type: string
+      description: |-
+        * `BLUE` - Blue Side
+        * `RED` - Red Side
+    Staff:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        handle:
+          type: string
+          description: Public alias / coach tag (e.g. BONCHAN, MASTERCOACH).
+          maxLength: 24
+        slug:
+          type: string
+          maxLength: 255
+          pattern: ^[-a-zA-Z0-9_]+$
+        photo:
+          type: string
+          format: uri
+          nullable: true
+        primary_role:
+          allOf:
+          - $ref: '#/components/schemas/PrimaryRoleEnum'
+          description: |-
+            Main role overall (head coach, analyst, etc.)
+
+            * `HEAD_COACH` - Head Coach
+            * `ASST_COACH` - Assistant Coach
+            * `ANALYST` - Analyst
+            * `MANAGER` - Team Manager
+        nationality:
+          type: string
+          readOnly: true
+        memberships:
+          type: array
+          items:
+            $ref: '#/components/schemas/StaffMembership'
+          readOnly: true
+      required:
+      - handle
+      - id
+      - memberships
+      - nationality
+      - primary_role
+    StaffMembership:
+      type: object
+      properties:
+        team:
+          type: integer
+        role_at_team:
+          allOf:
+          - $ref: '#/components/schemas/RoleAtTeamFa4Enum'
+          description: |-
+            Role held on this specific team during this period.
+
+            * `HEAD_COACH` - Head Coach
+            * `ASST_COACH` - Assistant Coach
+            * `ANALYST` - Analyst
+            * `MANAGER` - Team Manager
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+          nullable: true
+          description: Leave blank if still active with this team.
+      required:
+      - role_at_team
+      - start_date
+      - team
+    Stage:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        stage_type:
+          $ref: '#/components/schemas/StageTypeEnum'
+        variant:
+          type: string
+          description: Variant of the stage, e.g. 'Upper Bracket', 'Double Elimination'.
+          maxLength: 50
+        order:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          description: Order of the stage in the tournament (1 = earliest).
+        start_date:
+          type: string
+          format: date
+          description: When this stage starts.
+        end_date:
+          type: string
+          format: date
+          description: When this stage ends.
+        tier:
+          allOf:
+          - $ref: '#/components/schemas/StageTierEnum'
+          description: |-
+            Tier weight for ranking calc (1 = highest).
+
+            * `T1` - T1-tier
+            * `T2` - T2-tier
+            * `T3` - T3-tier
+            * `T4` - T4-tier
+            * `T5` - T5-tier
+            * `T6` - T6-tier
+        status:
+          allOf:
+          - $ref: '#/components/schemas/StatusEnum'
+          description: |-
+            Auto-computed (Upcoming / Ongoing / Completed).
+
+            * `UPCOMING` - Upcoming
+            * `ONGOING` - Ongoing
+            * `COMPLETED` - Completed
+        series:
+          type: array
+          items:
+            $ref: '#/components/schemas/Series'
+          readOnly: true
+      required:
+      - end_date
+      - id
+      - order
+      - series
+      - stage_type
+      - start_date
+      - status
+      - tier
+    StageTierEnum:
+      enum:
+      - T1
+      - T2
+      - T3
+      - T4
+      - T5
+      - T6
+      type: string
+      description: |-
+        * `T1` - T1-tier
+        * `T2` - T2-tier
+        * `T3` - T3-tier
+        * `T4` - T4-tier
+        * `T5` - T5-tier
+        * `T6` - T6-tier
+    StageTypeEnum:
+      enum:
+      - WILD CARD
+      - REGULAR SEASON
+      - KNOCKOUT
+      - GROUP
+      - PLAYOFFS
+      - FINALS
+      type: string
+      description: |-
+        * `WILD CARD` - Wild card Stage
+        * `REGULAR SEASON` - Regular Season
+        * `KNOCKOUT` - Knockout Stage
+        * `GROUP` - Group Stage
+        * `PLAYOFFS` - Playoff Stage
+        * `FINALS` - Finals
+    StatusEnum:
+      enum:
+      - UPCOMING
+      - ONGOING
+      - COMPLETED
+      type: string
+      description: |-
+        * `UPCOMING` - Upcoming
+        * `ONGOING` - Ongoing
+        * `COMPLETED` - Completed
+    Team:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 255
+        slug:
+          type: string
+          maxLength: 255
+          pattern: ^[-a-zA-Z0-9_]+$
+        short_name:
+          type: string
+          description: Abbreviated team name (2-10 uppercase letters/numbers).
+          pattern: ^[A-Za-z0-9]{3,5}$
+          maxLength: 10
+          minLength: 2
+        region:
+          type: string
+          readOnly: true
+        description:
+          type: string
+        achievements:
+          type: string
+        founded_year:
+          type: integer
+          maximum: 2100
+          minimum: 1850
+          nullable: true
+          description: Year the team was founded (between 1850 and 2100).
+        website:
+          type: string
+          format: uri
+          maxLength: 200
+        x:
+          type: string
+          format: uri
+          title: Twitter URL
+          maxLength: 200
+        facebook:
+          type: string
+          format: uri
+          title: Facebook URL
+          maxLength: 200
+        youtube:
+          type: string
+          format: uri
+          title: YouTube URL
+          maxLength: 200
+        logo:
+          type: string
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - id
+      - logo
+      - name
+      - region
+      - short_name
+      - updated_at
+    TeamGameStat:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        team_name:
+          type: string
+          readOnly: true
+        side:
+          $ref: '#/components/schemas/SideEnum'
+        tower_destroyed:
+          type: integer
+          maximum: 32767
+          minimum: 0
+        lord_kills:
+          type: integer
+          maximum: 32767
+          minimum: 0
+        turtle_kills:
+          type: integer
+          maximum: 32767
+          minimum: 0
+        orange_buff:
+          type: integer
+          maximum: 32767
+          minimum: 0
+          description: Number of Orange Buffs secured
+        purple_buff:
+          type: integer
+          maximum: 32767
+          minimum: 0
+          description: Number of Purple Buffs secured
+        game_result:
+          description: |-
+            Result of the game for the team
+
+            * `VICTORY` - Win
+            * `DEFEAT` - Loss
+          oneOf:
+          - $ref: '#/components/schemas/GameResultEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+        gold:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          description: Total Gold Earned by the team
+        t_score:
+          type: integer
+          maximum: 32767
+          minimum: 0
+          description: Total Team Score
+      required:
+      - id
+      - side
+      - team_name
+    TokenObtainPair:
+      type: object
+      properties:
+        access:
+          type: string
+          readOnly: true
+        refresh:
+          type: string
+          readOnly: true
+      required:
+      - access
+      - refresh
+    TokenObtainPairRequest:
+      type: object
+      properties:
+        username:
+          type: string
+          writeOnly: true
+          minLength: 1
+        password:
+          type: string
+          writeOnly: true
+          minLength: 1
+      required:
+      - password
+      - username
+    TokenRefresh:
+      type: object
+      properties:
+        access:
+          type: string
+          readOnly: true
+      required:
+      - access
+    TokenRefreshRequest:
+      type: object
+      properties:
+        refresh:
+          type: string
+          writeOnly: true
+          minLength: 1
+      required:
+      - refresh
+    TokenVerifyRequest:
+      type: object
+      properties:
+        token:
+          type: string
+          writeOnly: true
+          minLength: 1
+      required:
+      - token
+    Tournament:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 255
+        slug:
+          type: string
+          maxLength: 255
+          pattern: ^[-a-zA-Z0-9_]+$
+        region:
+          allOf:
+          - $ref: '#/components/schemas/RegionEnum'
+          description: |-
+            Primary region or league this tournament belongs to (e.g. PH, ID, INTL).
+
+            * `NA` - North America
+            * `ID` - Indonesia
+            * `MY` - Malaysia
+            * `PH` - Philippines
+            * `SG` - Singapore
+            * `BR` - Brazil
+            * `VN` - Vietnam
+            * `MM` - Myanmar
+            * `TH` - Thailand
+            * `IN` - India
+            * `TR` - Turkey
+            * `EU` - Europe
+            * `JP` - Japan
+            * `CN` - China
+            * `MENA` - Middle East and North Africa
+            * `KR` - Korea
+            * `TW` - Taiwan
+            * `HK` - Hong Kong
+            * `LATAM` - Latin America
+            * `INTL` - International
+        tier:
+          allOf:
+          - $ref: '#/components/schemas/TournamentTierEnum'
+          description: |-
+            S-tier (world), A-tier (continental), B-tier (franchise league), etc.
+
+            * `SS` - SS-tier
+            * `S` - S-tier
+            * `A` - A-tier
+            * `B` - B-tier
+            * `C` - C-tier
+            * `D` - D-tier
+        status:
+          $ref: '#/components/schemas/StatusEnum'
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+        prize_pool:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          nullable: true
+          description: Prize pool in USD.
+        description:
+          type: string
+          description: Public-facing description / summary for the tournament page.
+        rules_link:
+          type: string
+          format: uri
+          description: External link to official tournament rules / competitive rulebook.
+          maxLength: 200
+        logo:
+          type: string
+          readOnly: true
+        stages:
+          type: array
+          items:
+            $ref: '#/components/schemas/Stage'
+          readOnly: true
+      required:
+      - end_date
+      - id
+      - logo
+      - name
+      - region
+      - stages
+      - start_date
+      - status
+      - tier
+    TournamentTierEnum:
+      enum:
+      - SS
+      - S
+      - A
+      - B
+      - C
+      - D
+      type: string
+      description: |-
+        * `SS` - SS-tier
+        * `S` - S-tier
+        * `A` - A-tier
+        * `B` - B-tier
+        * `C` - C-tier
+        * `D` - D-tier

@@ -21,6 +21,8 @@ from .views import (
 )
 
 # We'll register viewsets on this router later
+app_name = "api"
+
 router = DefaultRouter()
 router.register(r'teams', TeamViewSet, basename='team')
 router.register(r'players', PlayerViewSet, basename='player')
@@ -36,7 +38,10 @@ router.register(r'game-draft-actions', GameDraftActionViewSet, basename='gamedra
 
 
 urlpatterns = [
+    # core resource endpoints
     path("", include(router.urls)),
+
+    # auth / identity endpoints
     path("auth/whoami/", WhoAmIView.as_view(), name="whoami"),
 
     path("auth/token/", EsportsTokenObtainPairView.as_view(), name="token_obtain"),

@@ -10,8 +10,9 @@ from .models import (
     TeamGameStat,
     PlayerGameStat,
     TournamentTeam,
+    GameDraftAction,
 )
-
+from apps.common.enums import TournamentStatus
 
 def get_upcoming_series(limit: int = 20):
     """
@@ -194,49 +195,201 @@ def get_team_recent_series(team_id: int, limit: int = 10):
     )
 
 
-def get_active_tournaments():
+def get_active_tournaments(limit: int = 20):
     """
-    Return tournaments that still matter right now:
-    - UPCOMING (future scheduled, not started)
-    - ONGOING (in progress)
-
-    This powers /api/v1/tournaments/ list, default view.
-    We also prefetch:
-      - stages → their series
-      - registered teams (TournamentTeam)
-    so the frontend can show structure without extra queries.
+    Return recent/active tournaments with nested prefetching so the public
+    tournament list/landing can render without N+1 queries.
     """
 
-    stage_series_prefetch = Prefetch(
-        "series",
+    # base queryset: most recent first (upcoming/ongoing/completed still appears)
+    base_qs = (
+        Tournament.objects.filter(
+            status__in=[
+                TournamentStatus.UPCOMING,
+                TournamentStatus.ONGOING,
+                TournamentStatus.COMPLETED,
+            ]
+        )
+        .order_by("-start_date")
+    )
+
+    # Prefetch tournament teams (with the actual team objects)
+    tournament_teams_prefetch = Prefetch(
+        "tournament_teams",  # ✅ matches related_name on TournamentTeam.tournament
+        queryset=TournamentTeam.objects.select_related("team").only(
+            "id",
+            "tournament_id",
+            "team_id",
+            "seed",
+            "kind",
+            "group",
+            "notes",
+            "team__id",
+            "team__short_name",
+            "team__region",
+            "team__slug",
+        ),
+        to_attr="prefetched_tournament_teams",  # optional nice-to-have
+    )
+
+    # Prefetch games (and their stats) under each series
+    games_prefetch = Prefetch(
+        "games",  # ✅ matches related_name='games' on Game.series
+        queryset=Game.objects.select_related(
+            "blue_side",
+            "red_side",
+            "winner",
+            "series",
+        )
+        .prefetch_related(
+            Prefetch(
+                "team_stats",  # ✅ Game.team_stats related_name='team_stats'
+                queryset=TeamGameStat.objects.select_related(
+                    "team",
+                ).only(
+                    "id",
+                    "game_id",
+                    "team_id",
+                    "side",
+                    "gold",
+                    "t_score",
+                    "tower_destroyed",
+                    "lord_kills",
+                    "turtle_kills",
+                    "orange_buff",
+                    "purple_buff",
+                    "game_result",
+                    "team__short_name",
+                    "team__slug",
+                ),
+                to_attr="prefetched_team_stats",
+            ),
+            Prefetch(
+                "player_stats",  # ✅ Game.player_stats related_name='player_stats'
+                queryset=PlayerGameStat.objects.select_related(
+                    "player",
+                    "team",
+                    "hero",
+                ).only(
+                    "id",
+                    "game_id",
+                    "player_id",
+                    "team_id",
+                    "role",
+                    "is_MVP",
+                    "k",
+                    "d",
+                    "a",
+                    "gold",
+                    "dmg_dealt",
+                    "dmg_taken",
+                    "player__id",
+                    "player__ign",
+                    "team__short_name",
+                    "hero__id",
+                    "hero__name",
+                ),
+                to_attr="prefetched_player_stats",
+            ),
+            Prefetch(
+                "draft_actions",  # ✅ Game.draft_actions related_name='draft_actions'
+                queryset=GameDraftAction.objects.select_related(
+                    "hero",
+                    "player",
+                    "team",
+                ).only(
+                    "id",
+                    "game_id",
+                    "action",
+                    "side",
+                    "order",
+                    "hero_id",
+                    "player_id",
+                    "team_id",
+                    "hero__name",
+                    "player__ign",
+                    "team__short_name",
+                ),
+                to_attr="prefetched_draft_actions",
+            ),
+        )
+        .only(
+            "id",
+            "series_id",
+            "game_no",
+            "blue_side_id",
+            "red_side_id",
+            "winner_id",
+            "duration",
+            "vod_link",
+            "result_type",
+            "blue_side__short_name",
+            "red_side__short_name",
+            "winner__short_name",
+        )
+        .order_by("game_no"),
+        to_attr="prefetched_games",
+    )
+
+    # Prefetch series (including games_prefetch above)
+    series_prefetch = Prefetch(
+        "series",  # ✅ Stage.series related_name='series'
         queryset=Series.objects.select_related(
             "team1",
             "team2",
             "winner",
-        ).order_by("-scheduled_date"),
+            "tournament",
+            "stage",
+        )
+        .prefetch_related(games_prefetch)
+        .only(
+            "id",
+            "tournament_id",
+            "stage_id",
+            "team1_id",
+            "team2_id",
+            "winner_id",
+            "best_of",
+            "scheduled_date",
+            "score",
+            "team1__short_name",
+            "team2__short_name",
+            "winner__short_name",
+            "stage__stage_type",
+            "stage__variant",
+        )
+        .order_by("-scheduled_date"),
+        to_attr="prefetched_series",
     )
 
+    # Prefetch stages (including the series_prefetch above)
     stages_prefetch = Prefetch(
-        "stages",
-        queryset=Stage.objects.prefetch_related(stage_series_prefetch).order_by(
+        "stages",  # ✅ Tournament.stages related_name='stages'
+        queryset=Stage.objects.select_related(
+            "tournament",
+        )
+        .prefetch_related(series_prefetch)
+        .only(
+            "id",
+            "tournament_id",
+            "stage_type",
+            "variant",
             "order",
             "start_date",
-        ),
+            "end_date",
+            "tier",
+            "status",
+        )
+        .order_by("order"),
+        to_attr="prefetched_stages",
     )
 
-    teams_prefetch = Prefetch(
-        "tournamentteam_set",
-        queryset=TournamentTeam.objects.select_related("team").order_by(
-            "seed",
-            "team__short_name",
-        ),
-    )
-
+    # finally: return enriched queryset
     return (
-        Tournament.objects
-        .filter(status__in=["UPCOMING", "ONGOING"])
-        .prefetch_related(stages_prefetch, teams_prefetch)
-        .order_by("-start_date")
+        base_qs.prefetch_related(
+            tournament_teams_prefetch,
+            stages_prefetch,
+        )[:limit]
     )
 
 
