@@ -461,6 +461,8 @@ class Series(TimeStampedModel, UserStampedModel):
 
     def compute_score_and_winner(self, persist: bool = True):
         from .services import compute_series_score_and_winner
+        if not self.pk:
+            return self.score, self.winner
 
         score_str, winner_team = compute_series_score_and_winner(self)
         winner_id = winner_team.id if winner_team else None
@@ -521,8 +523,10 @@ class Series(TimeStampedModel, UserStampedModel):
         super().clean()
 
     def save(self, *args, **kwargs):
-        self.compute_score_and_winner(persist=True)
+        creating = self._state.adding
         super().save(*args, **kwargs)
+        if not creating:
+            self.compute_score_and_winner(persist=True)
 
 
 class Game(TimeStampedModel, UserStampedModel):
